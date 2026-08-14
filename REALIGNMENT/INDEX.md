@@ -1,6 +1,8 @@
 # Headroom Realignment — Index
 
-**Status:** Drafted 2026-05-01 from a 10-agent deep audit against `~/Downloads/llm-proxy-compression-guide.md`.
+**Status (2026-08-14):** Phases A–G are **implemented** — the Rust proxy has native Bedrock/Vertex, SSE, WebSocket, and cache-stabilization code in-tree. Phase H is **superseded**: the Python-proxy retirement is now driven by the implementation plan `docs/superpowers/plans/2026-08-14-finish-python-to-rust-conversion.md` (its Phase 3 maps to the old H1/H2/H3 PRs, refreshed against the current tree). See the design doc `docs/superpowers/specs/2026-08-14-finish-python-to-rust-conversion-design.md` for the full end-state architecture and the decisions needing greenlight.
+
+**Originally:** Drafted 2026-05-01 from a 10-agent deep audit against `~/Downloads/llm-proxy-compression-guide.md`.
 **Owner:** chopratejas
 **Goal:** Move the entire codebase to Rust, preserve prefix cache, retain compression value, integrate RTK end-to-end, and gate compression policy by auth mode (PAYG / OAuth / subscription).
 
