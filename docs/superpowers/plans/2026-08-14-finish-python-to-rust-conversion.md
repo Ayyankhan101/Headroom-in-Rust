@@ -10,6 +10,8 @@
 
 ## Global Constraints
 
+- **Baseline is the synced tree.** The 27-commit upstream sync was executed 2026-08-14 (clean fast-forward onto `origin/main`) **before** this plan runs. Every inline file list below is **illustrative, not exhaustive** — the authoritative delete list, LOC counts, and `headroom._core` consumer map are measured fresh into `BASELINE.md` in Phase 0 Task 0.1 against the synced tree. Notable sync deltas the plan text predates: `headroom/proxy/` has **93 Python files / 28,531 LOC** (plan names only ~15); sync added `savings_attribution.py`, `outcome.py` (595 LOC), `turn_hooks.py`; Python handlers total **20,212 LOC** (not ~25.7K) and are `anthropic.py openai.py streaming.py gemini.py batch.py bedrock.py _debug_dump.py` (no `conversations.py`/`chat_completions.py` — those are Rust-side); `semantic_cache.py` lives at `headroom/proxy/semantic_cache.py` (not `headroom/semantic_cache.py`).
+- **`/dashboard` fate deferred to Phase 3.** The Python server serves an operator web UI (`/dashboard`, `/settings`, static templates under `headroom/dashboard/templates/`) with no Rust equivalent. The decision to retire it (and document the loss) or port a minimal Rust dashboard is made in the Phase 3 PR, not in this plan.
 - **Byte-faithful passthrough invariant** — any non-modifying request must round-trip byte-equal (SHA-256) through the proxy; no silent fallbacks, fail-loud only.
 - **Commit convention** — `fix:` prefix for migration code commits (semantic-release); `docs:` allowed for pure documentation; no `Co-Authored-By: Claude` trailer.
 - **Gates before push** — `make ci-precheck` must be green (cargo fmt/clippy/test + smart-crusher Python subset + commitlint); `make test-parity` per-PR (Skipped allowed, Diff blocks).
@@ -21,7 +23,7 @@
 
 ## Phase 0 — Baseline verification (grounding)
 
-The upstream-sync decision (Section 7 of the design doc) must be resolved and applied **before** this phase starts. Everything below is measured against the *final* tree.
+The upstream-sync decision (Section 7 of the design doc) has been **resolved and applied** (2026-08-14, 27 commits, clean fast-forward). Everything below is measured against the *synced* tree.
 
 ### Task 0.1: Lock the measured baseline
 
@@ -100,37 +102,41 @@ The per-PR parity gate **already exists** in `.github/workflows/rust.yml` (job `
 ### Task 1.1: Re-record `cache_aligner` fixtures against the detector-only transform
 
 **Files:**
-- Test: `tests/parity/record_cache_aligner.py` (new — mirrors `record_smart_crusher.py`)
+- Modify: `tests/parity/recorder.py` — extend `run_default_workload()` to drive the detector-only `CacheAligner` (the patch in `record_all()` already wraps `CacheAligner.apply`; the workload just never calls it with a tokenizer, per the comment at recorder.py:230)
 - Modify: `tests/parity/fixtures/cache_aligner/*.json` (re-recorded)
 
 **Interfaces:**
 - Consumes: `headroom/transforms/cache_aligner.py` `CacheAligner` (current detector-only API — `apply(messages)` returns `TransformResult` with populated `warnings`/`cache_metrics`, messages untouched)
 - Produces: fixture `output` whose `messages` equal the input messages (no `[Dynamic Context]` block), `transforms_applied` no longer contains `"cache_align"` rewrite entries.
 
-- [ ] **Step 1: Write the re-recording script**
+- [ ] **Step 1: Extend the recorder workload**
 
-Copy `tests/parity/record_smart_crusher.py`'s structure. Drive the current detector-only `CacheAligner` over a small synthetic workload (a system prompt containing a UUID, an ISO-8601 timestamp, and a hex hash; a stable control message). Emit fixtures via the shared `tests/parity/recorder.py` machinery.
+`tests/parity/recorder.py` already monkey-patches `CacheAligner.apply` (`record_all`, line ~230). Add a `cache_aligner` block to `run_default_workload()` driving the current detector-only transform: a system prompt containing a UUID, an ISO-8601 timestamp, and a hex hash; a stable control message. `CacheAligner.apply` needs a `Tokenizer` argument — build `EstimatingTokenCounter` the same way `headroom/transforms/cache_aligner.py` does, and pass it.
 
 ```python
-# tests/parity/record_cache_aligner.py (skeleton — follow record_smart_crusher.py conventions)
+# inside tests/parity/recorder.py run_default_workload()
+# --- cache_aligner (detector-only) ---
 from headroom.transforms.cache_aligner import CacheAligner
-from tests.parity.recorder import record_all  # or the equivalent decorator/entrypoint
+from headroom.tokenizers import EstimatingTokenCounter
 
-def workload():
-    return [
-        {"role": "system", "content": "You are a helpful assistant. Request id 12. UUID 123e4567-e89b-12d3-a456-426614174000."},
-        {"role": "user", "content": "Question number 12: what is 2+2?"},
-    ]
+aligner = CacheAligner()
+tok = EstimatingTokenCounter()
+for content in (
+    "You are a helpful assistant. Request id 12. UUID 123e4567-e89b-12d3-a456-426614174000.",
+    "Current date: 2026-08-14T09:30:00Z. Trace 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08.",
+    "Stable system prompt, no volatile content.",
+):
+    aligner.apply([{"role": "system", "content": content}], tokenizer=tok)
 ```
 
 - [ ] **Step 2: Run it and verify the new fixture shape**
 
 ```bash
-python -m scripts.record_fixtures --only cache_aligner  # or the script's actual entrypoint
-python -c "import json; f=json.load(open('tests/parity/fixtures/cache_aligner/<new>.json')); print(f['output']['messages'] == f['input'])"
+python scripts/record_fixtures.py
+python -c "import json,glob; f=glob.glob('tests/parity/fixtures/cache_aligner/*.json')[0]; d=json.load(open(f)); print(d['output']['messages'] == d['input'])"
 ```
 
-Expected: `output.messages == input` (detector is a no-op on messages), `output.warnings` non-empty for the volatile-content inputs, and **no** `[Dynamic Context]` block anywhere.
+Expected: `output.messages == input` (detector is a no-op on messages), `output.warnings` non-empty for the volatile-content inputs, and **no** `[Dynamic Context]` block anywhere. Note: `scripts/record_fixtures.py` has **no `--only` flag** — it re-records the full fixture set, so run it once for both Tasks 1.1 and 1.2.
 
 - [ ] **Step 3: Delete the stale fixtures**
 
@@ -148,20 +154,31 @@ git commit -m "fix(parity): re-record cache_aligner fixtures against detector-on
 ### Task 1.2: Re-record `ccr` fixtures against the sticky-on injection path
 
 **Files:**
-- Test: `tests/parity/record_ccr.py` (new)
+- Modify: `tests/parity/recorder.py` — extend `run_default_workload()` to drive the sticky-on injector
 - Modify: `tests/parity/fixtures/ccr/*.json` (re-recorded)
 
 **Interfaces:**
 - Consumes: `headroom/ccr/tool_injection.py` `CCRToolInjector(provider="anthropic").inject_tool_definition(tools, session_has_done_ccr=True)` and `create_ccr_tool_definition("anthropic")`
 - Produces: fixture `output` = `[tools_with_injected_headroom_retrieve, true]` matching the current definition (hash-only `input_schema`).
 
-- [ ] **Step 1: Write the re-recording script**
+- [ ] **Step 1: Extend the recorder workload**
 
-Drive `CCRToolInjector.inject_tool_definition(tools, session_has_done_ccr=True)` over a few tools arrays (empty, single tool, tool already named `headroom_retrieve`, tool present in MCP form with a `function.name`). The sticky-on flag is the correct model: the real proxy registers `headroom_retrieve` on every request once a session has done CCR (Phase B PR-B7).
+`record_all()` already wraps `CCRToolInjector.inject_tool_definition` (recorder.py:255). Add a `ccr` block to `run_default_workload()` driving it with `session_has_done_ccr=True` over a few tools arrays (empty, single tool, tool already named `headroom_retrieve`, tool present in MCP form with a `function.name`). The sticky-on flag is the correct model: the real proxy registers `headroom_retrieve` on every request once a session has done CCR (Phase B PR-B7).
+
+```python
+# inside tests/parity/recorder.py run_default_workload()
+# --- ccr (sticky-on) ---
+from headroom.ccr.tool_injection import CCRToolInjector
+
+injector = CCRToolInjector(provider="anthropic")
+for tools in ([], [{"name": "other_tool"}], [{"name": "headroom_retrieve"}], [{"type": "function", "function": {"name": "headroom_retrieve"}}]):
+    injector.inject_tool_definition(tools, session_has_done_ccr=True)
+```
 
 - [ ] **Step 2: Run it and verify against current Python**
 
 ```bash
+python scripts/record_fixtures.py
 python -c "
 from headroom.ccr.tool_injection import create_ccr_tool_definition
 d = create_ccr_tool_definition('anthropic')
@@ -609,10 +626,9 @@ Delete list source of truth: `BASELINE.md` (Task 0.1). Each PR is split into one
 
 ### Task 3.1: PR-3.1 — delete the Python proxy request path
 
-**Files (delete — exact list from BASELINE.md, verified 2026-08-14; server.py is 5,933 lines):**
-- `headroom/proxy/server.py`
-- `headroom/proxy/handlers/` (anthropic.py 2,423, openai.py 2,742, streaming.py 1,131, gemini.py 839, batch.py 1,010, conversations.py, chat_completions.py)
-- `headroom/proxy/interceptors/`, `headroom/proxy/{cost,helpers,rate_limiter,request_logger,prometheus_metrics,extensions,models,modes,stage_timer,warmup,debug_introspection,savings_tracker,loopback_guard,ws_session_registry,memory_handler,memory_tool_adapter,semantic_cache}.py` (names verified by `ls headroom/proxy/` in Task 0.1 — use the measured list)
+**Files (delete — EXACT list from BASELINE.md Task 0.1, measured against the synced tree; the list below is illustrative and incomplete by design):**
+- `headroom/proxy/` — the **entire directory** (server.py 5,933 lines; **93 Python files / 28,531 LOC total**, measured post-sync). This includes `server.py`, `handlers/` (anthropic.py 2,423, openai.py 2,742, streaming.py 1,131, gemini.py 839, batch.py 1,010, **bedrock.py, _debug_dump.py** — note: there is no `conversations.py`/`chat_completions.py` in Python; those are Rust-side), `interceptors/`, and all support modules: `cost, helpers, rate_limiter, request_logger, prometheus_metrics, extensions, models, modes, stage_timer, warmup, debug_introspection, savings_tracker, savings_attribution, outcome, turn_hooks, loopback_guard, ws_session_registry, memory_handler, memory_tool_adapter, semantic_cache` (at `headroom/proxy/semantic_cache.py`), plus the ~50 `*_policy.py`, `*_decision.py`, `body_forwarding.py`, `route_advice.py`, `ssl_context.py`, `model_router.py`, `runtime_env.py`, `persistent_metrics.py`, `probe_recorder.py`, `passthrough.py`, `audit.py`, `auth_mode.py` etc. **Do not hand-enumerate — delete the whole directory minus any survivors BASELINE.md's consumer map proves are imported by off-path Python, and confirm with `git grep` that nothing outside `headroom/proxy/` imports the deleted modules.**
+- `/dashboard` web UI: **decision deferred to this PR** (see Global Constraints) — either document the retirement of the Python-served dashboard/static routes (`headroom/dashboard/templates/`) or port a minimal Rust equivalent, and update the exit gate accordingly.
 - `headroom/transforms/cache_aligner.py` (413 lines, detector-only — deleted here; its Rust port lives in headroom-core from Task 1.4)
 - Proxy-only test files: all `tests/test_proxy_*.py` (66 files measured) + handler/transform tests that exercise the Python request path (from BASELINE.md's consumer map; keep ~40 that test surviving Python)
 
@@ -665,12 +681,13 @@ curl -s http://127.0.0.1:8787/healthz   # {"ok": true, "service": "headroom-prox
 ### Task 3.2: PR-3.2 — retire the LiteLLM Bedrock/Vertex backend
 
 **Files:**
-- Delete: `headroom/backends/litellm.py` (~1,500 lines), `headroom/backends/__init__.py` (if it only re-exports litellm)
+- Delete: `headroom/backends/litellm.py` (~1,500 lines) — **only this file**
+- **Keep:** `headroom/backends/base.py` — imported by `headroom/cache/compression_store.py` and `headroom/telemetry/toin.py`, **both of which survive**; and `headroom/backends/__init__.py` + `anyllm.py` — `__init__.py` re-exports more than litellm (verified: `anyllm`). Do NOT delete the directory wholesale.
 - Modify: `headroom/providers/registry.py` — remove `litellm-bedrock`, `litellm-vertex` entries (verified: `create_proxy_backend` at registry.py:188 has a `litellm_backend_cls` parameter); `pyproject.toml` — drop `litellm` dependency
 - Delete tests: `tests/test_backends_litellm*.py`, `tests/test_vertex_claude_compression.py` (it calls `registry.create_proxy_backend` — verify against BASELINE.md's consumer map first)
 
-- [ ] **Step 1: Delete litellm + registry entries + dep**
-- [ ] **Step 2: Run gates** — `pytest -x tests/test_provider_registry.py` (still green without litellm entries), `cargo test --workspace`
+- [ ] **Step 1: Delete litellm + registry entries + dep** (keep `base.py`, `anyllm.py`, `__init__.py`)
+- [ ] **Step 2: Run gates** — `pytest -x tests/test_provider_registry.py` (still green without litellm entries), `pytest -x tests/test_ccr.py` (exercises toin/compression_store paths that import backends.base), `cargo test --workspace`
 - [ ] **Step 3: Commit per module**
 
 ```bash
@@ -678,7 +695,7 @@ git rm headroom/backends/litellm.py && git commit -m "fix(backends): retire pyth
 # then registry + deps commits
 ```
 
-**PR-3.2 exit gate:** no `litellm` in runtime deps or non-test code (`git grep -i litellm headroom/` clean except tests); native Bedrock/Vertex Rust routes still covered by `cargo test --workspace`.
+**PR-3.2 exit gate:** no `litellm` in runtime deps or non-test code (`git grep -i litellm headroom/` clean except tests); `headroom/backends/base.py` still importable by `cache/compression_store.py` and `telemetry/toin.py`; native Bedrock/Vertex Rust routes still covered by `cargo test --workspace`.
 
 ### Task 3.3: PR-3.3 — final cleanup
 
@@ -800,4 +817,5 @@ git commit -m "docs: add operator migration guide and refresh docs for rust-only
 - **§7 Q6** → verified already wired in CI (Task 1.5); **Q7 + deviation** → Task 2.1 (default stays `python` through canary; rollback = env var + retained images, not in-tree Python); **Q12** → Task 3.3 Step 1; **sync before Phase 0** → Task 0.1 ✓
 - **§6 risks** — "deleting Python before parity" gated by Phase 1/2 exit gates; "uncovered request path" caught by the Phase 2 shadow test; "surviving-Python regression" gated per-PR by the smart-crusher pytest list ✓
 - **Placeholder scan** — every task lists concrete files, commands, and expected outputs; the only intentional "fill in" is the exact env-mapping table in Task 2.1 Step 3, which names the source file (`config.rs`) and requires a unit test on the mapping dict — implementer completes against the named source, not from memory.
+- **Pre-flight review (2026-08-14, against the synced tree)** — the following gaps found during the plan review were fixed in-place: (1) Phase 3.1 now deletes the entire `headroom/proxy/` directory (93 files / 28,531 LOC) instead of an incomplete ~15-file enumeration, and carries the deferred `/dashboard` decision; (2) Phase 3.2 keeps `backends/base.py`/`anyllm.py`/`__init__.py` (consumed by surviving `cache/compression_store.py` + `telemetry/toin.py`); (3) Tasks 1.1/1.2 now extend the existing `tests/parity/recorder.py` workload instead of writing new recorder scripts, and use `python scripts/record_fixtures.py` (no `--only` flag exists); (4) stale paths corrected (`semantic_cache.py` → `headroom/proxy/`; no `conversations.py`/`chat_completions.py` in Python handlers); (5) Global Constraints note the sync delta (27 commits, savings_attribution/outcome/turn_hooks added upstream).
 - **Type consistency** — `inject_retrieve_tool(tools, sticky: bool) -> (Vec<Value>, bool)` defined in Task 1.3 and consumed only there; `detect_cache_volatility(messages, config) -> CacheAlignResult` defined and consumed in Task 1.4; `_spawn_rust_proxy`/`_rust_proxy_env_mapping` defined in Task 2.1 and consumed by Task 2.2 via env forwarding.
