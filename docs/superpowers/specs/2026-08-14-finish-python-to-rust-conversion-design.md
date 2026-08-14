@@ -173,8 +173,8 @@ Produce the full documentation set (analysis, this design, the implementation pl
 - Approach: Verify → Switch → Retire (approach A), single contributor, sequential.
 - Deliverable: documented PR to the fork's public `main`.
 
-**Carried from REALIGNMENT `12-decisions-needed.md` (need greenlight before the corresponding PR):**
-- Q6 — enable `make test-parity` per-PR gate now (recommended: yes, Phase 1).
-- Q7 — `HEADROOM_PROXY_BACKEND` env var with default flip to `rust` after canary (Phase 2). **Deviation from the carried recommendation:** REALIGNMENT kept the Python proxy alive in-tree for 30 days post-H1 as the rollback target; this plan deletes it right after Phase 2's canary and relies on revertible PRs + 30-day retained images instead. Greenlight the deviation.
-- Q12 — repurpose parity harness to Rust-vs-Rust (Phase 3.3).
-- New — upstream 26-commit sync: sync before Phase 0 (recommended), or document the fork as intentionally diverged?
+**Carried from REALIGNMENT `12-decisions-needed.md` — ALL GREENLIT 2026-08-14:**
+- **Q6 — ✅ greenlit.** Enable `make test-parity` per-PR gate. (Verified already wired in `.github/workflows/rust.yml`; no CI change needed — Phase 1 confirms.)
+- **Q7 — ✅ greenlit, including the deviation.** `HEADROOM_PROXY_BACKEND` env var with default flip to `rust` after canary (Phase 2). **Deviation approved:** rollback relies on revertible PRs + 30-day retained images, not 30-day in-tree Python retention.
+- **Q12 — ✅ greenlit.** Repurpose parity harness to Rust-vs-Rust version parity (Phase 3.3).
+- **New — ✅ greenlit: sync before Phase 0.** The 26-commit upstream sync is executed before Phase 0 so the delete list, parity baseline, and docs describe the tree they ship with.
