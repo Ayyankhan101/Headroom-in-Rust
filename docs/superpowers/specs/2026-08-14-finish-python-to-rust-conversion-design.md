@@ -85,15 +85,17 @@ Off-path (Python survives):
 
 **Deleted from the repo** (once parity is proven): `headroom/proxy/*` (server, handlers, interceptors, policies, cost, rate limiter, request logger, prometheus metrics), request-path `headroom/transforms/*` Python, `headroom/backends/litellm.py`, `semantic_cache.py`, memory request-path modules, ~150 proxy-only test files, proxy-only runtime deps (`fastapi`, `uvicorn`, etc. — kept in dev/test deps for the parity harness).
 
-**Parity harness fate (decision Q12):** repurposed, not deleted — `headroom-parity` becomes a Rust-vs-Rust version-parity harness over the recorded fixtures, guarding future ML compressor changes (e.g. a Kompress port).
+**Parity harness fate (decision Q12, pending greenlight):** repurposed, not deleted — `headroom-parity` becomes a Rust-vs-Rust version-parity harness over the recorded fixtures, guarding future ML compressor changes (e.g. a Kompress port).
 
 ---
 
 ## 4. Phase structure
 
-All phases sequential; each has a verification exit gate. Phases 3–5 map to REALIGNMENT Phase H (H1/H2/H3) refreshed against the current tree.
+All phases sequential; each has a verification exit gate. The three Phase 3 retirement PRs map to REALIGNMENT Phase H (H1/H2/H3) refreshed against the current tree. The 26-commit upstream-sync question is resolved **before Phase 0** — the delete list, parity baseline, and docs must describe the tree they actually ship with.
 
 ### Phase 0 — Baseline verification (grounding)
+
+**Prerequisite:** the 26-commit upstream-sync decision (Section 7) is resolved first, and the sync (if greenlit) is applied — the baseline below is locked against the *final* tree.
 
 Inventory the *current* tree: exact delete list (files + LOC + import consumers), which Python modules the Rust proxy still depends on via `headroom._core`, and the current parity report. Run the gates once to establish the starting truth.
 
@@ -109,7 +111,9 @@ Promote the last stubbed comparators: record `cache_aligner` and `ccr` fixtures 
 
 Add `HEADROOM_PROXY_BACKEND={python|rust}` (REALIGNMENT Q7) to `headroom/cli/proxy.py`. When `rust`, `headroom proxy start` spawns `./target/release/headroom-proxy` with the equivalent flags/env and forwards health checks. Add a byte-equality shadow test: the same recorded/real traffic through both backends must produce SHA-256-identical upstream bytes and responses.
 
-**Exit gate:** both backends boot; shadow test green; rollback path (`HEADROOM_PROXY_BACKEND=python`) proven in the e2e canary.
+**Coverage beyond `proxy start`:** `headroom/cli/wrap.py` also boots the proxy directly via `subprocess.Popen`, and `headroom/providers/copilot/wrap.py`'s `detect_running_proxy_backend` + `query_proxy_config` read `config.backend` from the `/health` endpoint (tests assert values like `"anyllm"`/`"anthropic"`). This phase must therefore (a) route the `wrap` spawn path through the same backend switch, and (b) keep the `/health` response schema stable across both backends so CLI-side backend detection keeps working (Rust reports the Python-equivalent backend string).
+
+**Exit gate:** both backends boot via both `proxy start` and `wrap`; shadow test green; `/health` schema-identical across backends (copilot detection tests pass against Rust); rollback path (`HEADROOM_PROXY_BACKEND=python`) proven in the e2e canary.
 
 ### Phase 3 — Retirement (3 PRs, refreshed REALIGNMENT H1/H2/H3)
 
@@ -155,7 +159,7 @@ Produce the full documentation set (analysis, this design, the implementation pl
 |---|---|
 | Deleting Python before Rust proves parity | Phase 0 proof + Phase 1 parity gate + Phase 2 shadow test are prerequisites for any deletion |
 | Uncovered request path in Rust (policy, handler edge case, WS frame type) | Phase 2 canary with both backends live; `HEADROOM_PROXY_BACKEND=python` remains as emergency fallback |
-| 26-commit fork drift makes docs stale | Upstream sync decided before Phase 4; docs describe the tree they ship with |
+| 26-commit fork drift makes docs stale | Upstream sync decision resolved before Phase 0 (and applied if greenlit) so the delete list, parity baseline, and docs describe the tree they ship with |
 | Regression in surviving Python | Per-PR `pytest -x` gate over the surviving-module smoke list |
 | Parity harness loses its oracle after Python is deleted | Repurposed to Rust-vs-Rust version parity (decision Q12) |
 | Rollback of a retirement PR | Each PR is `git revert`-able; images retained 30 days post-cutover (REALIGNMENT H1) |
@@ -171,6 +175,6 @@ Produce the full documentation set (analysis, this design, the implementation pl
 
 **Carried from REALIGNMENT `12-decisions-needed.md` (need greenlight before the corresponding PR):**
 - Q6 — enable `make test-parity` per-PR gate now (recommended: yes, Phase 1).
-- Q7 — `HEADROOM_PROXY_BACKEND` env var with default flip to `rust` after canary (Phase 2).
+- Q7 — `HEADROOM_PROXY_BACKEND` env var with default flip to `rust` after canary (Phase 2). **Deviation from the carried recommendation:** REALIGNMENT kept the Python proxy alive in-tree for 30 days post-H1 as the rollback target; this plan deletes it right after Phase 2's canary and relies on revertible PRs + 30-day retained images instead. Greenlight the deviation.
 - Q12 — repurpose parity harness to Rust-vs-Rust (Phase 3.3).
-- New — upstream 26-commit sync: sync before Phase 4, or document the fork as intentionally diverged?
+- New — upstream 26-commit sync: sync before Phase 0 (recommended), or document the fork as intentionally diverged?
