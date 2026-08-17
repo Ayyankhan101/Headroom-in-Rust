@@ -17,6 +17,7 @@
 
 pub mod adaptive_sizer;
 pub mod anchor_selector;
+pub mod cache_aligner;
 pub mod code_compressor;
 pub mod content_detector;
 pub mod detection;

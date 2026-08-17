@@ -1,10 +1,8 @@
 //! Parity harness: load JSON fixtures recorded from the Python implementation,
 //! run the Rust port, and compare outputs.
 //!
-//! Seven of the eight comparators are real: `log_compressor`, `diff_compressor`,
-//! `tokenizer`, `smart_crusher`, `content_detector`, `text_crusher`, `ccr`. One
-//! remains a stub (`cache_aligner`) and reports `Skipped` — see the
-//! `stub_comparator!` block below for what it is waiting on.
+//! All eight comparators are real. The parity gate's exit criterion is
+//! zero `Skipped` on request-path transforms.
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -146,34 +144,59 @@ pub fn run_comparator(dir: &Path, comparator: &dyn TransformComparator) -> Resul
     Ok(report)
 }
 
-// --- Built-in comparator stubs ---------------------------------------------
-//
-// These return `Err`, which the harness turns into `Skipped` rather than a
-// panic or a diff — so a stubbed comparator cannot fail the parity gate. The
-// remaining stub is blocked on missing Rust surface, not on wiring:
-//
-// * `cache_aligner` — needs the volatile-content detector ported from
-//   `headroom/transforms/cache_aligner.py` into `headroom-core`.
+/// Real comparator for the `cache_aligner` transform. Fixture input is a
+/// messages array; output is the detector-only `TransformResult` shape
+/// the Python recorder serialized (all fields via `asdict`): messages
+/// unchanged, `warnings` + `cache_metrics` populated, and the fixed
+/// `transforms_applied=[]` / null / empty fields.
+///
+/// The recorder drove `OpenAITokenCounter("gpt-4o-mini")`, so token
+/// counts are o200k_base — rebuilt via `TiktokenCounter`. Config is
+/// ignored: the detector-only Python `apply` never reads it (the legacy
+/// `date_patterns` / `detection_tiers` / `entropy_threshold` surface is
+/// unused in the detector path).
+pub struct CacheAlignerComparator;
 
-macro_rules! stub_comparator {
-    ($ty:ident, $name:literal) => {
-        pub struct $ty;
-        impl TransformComparator for $ty {
-            fn name(&self) -> &str {
-                $name
-            }
-            fn run(
-                &self,
-                _input: &serde_json::Value,
-                _config: &serde_json::Value,
-            ) -> Result<serde_json::Value> {
-                anyhow::bail!(concat!("comparator ", $name, " not implemented (Phase 0)"))
-            }
-        }
-    };
+impl TransformComparator for CacheAlignerComparator {
+    fn name(&self) -> &str {
+        "cache_aligner"
+    }
+
+    fn run(
+        &self,
+        input: &serde_json::Value,
+        _config: &serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        use headroom_core::tokenizer::{TiktokenCounter, Tokenizer};
+        use headroom_core::transforms::cache_aligner::detect_cache_volatility;
+
+        let messages = input
+            .as_array()
+            .context("cache_aligner fixture input must be a JSON array of messages")?;
+        let counter = TiktokenCounter::for_model("gpt-4o-mini")
+            .context("init TiktokenCounter for gpt-4o-mini")?;
+        let result = detect_cache_volatility(messages, |t| counter.count_text(t));
+
+        Ok(serde_json::json!({
+            "cache_metrics": {
+                "stable_prefix_bytes": result.cache_metrics.stable_prefix_bytes,
+                "stable_prefix_tokens_est": result.cache_metrics.stable_prefix_tokens_est,
+                "stable_prefix_hash": result.cache_metrics.stable_prefix_hash,
+                "prefix_changed": result.cache_metrics.prefix_changed,
+                "previous_hash": result.cache_metrics.previous_hash,
+            },
+            "diff_artifact": serde_json::Value::Null,
+            "markers_inserted": result.markers_inserted,
+            "messages": result.messages,
+            "timing": serde_json::json!({}),
+            "tokens_after": result.tokens_after,
+            "tokens_before": result.tokens_before,
+            "transforms_applied": serde_json::json!([]),
+            "warnings": result.warnings,
+            "waste_signals": serde_json::Value::Null,
+        }))
+    }
 }
-
-stub_comparator!(CacheAlignerComparator, "cache_aligner");
 
 /// Real comparator for the `ccr` transform. Fixture input is a tools
 /// array (or `null` — the recorder's `tools=None` sticky case); output
@@ -987,21 +1010,54 @@ mod tests {
         assert_eq!(report.total(), 0);
     }
 
+    /// A comparator that always errors — proves the harness turns
+    /// comparator errors into `Skipped` rather than panicking.
+    struct AlwaysErr;
+    impl TransformComparator for AlwaysErr {
+        fn name(&self) -> &str {
+            "always_err"
+        }
+        fn run(
+            &self,
+            _input: &serde_json::Value,
+            _config: &serde_json::Value,
+        ) -> Result<serde_json::Value> {
+            anyhow::bail!("comparator error")
+        }
+    }
+
     #[test]
-    fn stub_comparators_skip_rather_than_panic() {
-        // Uses `cache_aligner` because `log_compressor` is a real comparator
-        // now. Any remaining `stub_comparator!` works here — the point is that
-        // an unimplemented comparator reports Skipped instead of panicking.
+    fn comparator_errors_report_skipped() {
         let tmp = tempdir();
         write_fixture(
             tmp.path(),
-            "cache_aligner",
+            "always_err",
             "case1",
             serde_json::json!({"compressed": "x"}),
         );
-        let report = run_comparator(tmp.path(), &CacheAlignerComparator).unwrap();
+        let report = run_comparator(tmp.path(), &AlwaysErr).unwrap();
         assert_eq!(report.skipped.len(), 1);
         assert_eq!(report.matched, 0);
+    }
+
+    #[test]
+    fn cache_aligner_comparator_matches_recorded_fixture() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/parity/fixtures");
+        let report = run_comparator(&dir, &CacheAlignerComparator).unwrap();
+        assert_eq!(
+            report.matched,
+            report.total(),
+            "all cache_aligner fixtures must match, got {report:?}"
+        );
+        assert!(
+            report.skipped.is_empty(),
+            "cache_aligner fixtures must not skip: {report:?}"
+        );
+        assert!(
+            report.diffed.is_empty(),
+            "cache_aligner fixtures must not diff: {report:?}"
+        );
+        assert!(report.total() > 0, "expected cache_aligner fixtures on disk");
     }
 
     /// Minimal tempdir helper to avoid a dev-dependency on `tempfile`.
