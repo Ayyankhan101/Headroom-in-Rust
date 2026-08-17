@@ -585,8 +585,17 @@ fn build_session(path: &Path) -> Result<Session, Box<dyn std::error::Error + Sen
     // do — when it is unavailable this returns a loud error naming
     // `ORT_DYLIB_PATH` / `onnxruntime` instead of hanging.
     crate::transforms::magika_detector::dynamic_ort_loader_ready().map_err(|reason| {
-        let msg: Box<dyn std::error::Error + Send + Sync> =
-            format!("ONNX Runtime unavailable: {reason}").into();
+        // Include an actionable hint: the model was already found in the
+        // local HF cache (we only reach `build_session` with real paths), so
+        // a dev blocked here needs to know the dylib is the missing piece.
+        let msg: Box<dyn std::error::Error + Send + Sync> = format!(
+            "ONNX Runtime unavailable: {reason}. \
+             The kompress model is cached locally; to run kompress, \
+             `pip install onnxruntime` or set ORT_DYLIB_PATH to your \
+             onnxruntime shared library (e.g. the path shown in \
+             RUST_DEV.md / docs/operations/python-to-rust-migration.md)."
+        )
+        .into();
         msg
     })?;
     let session = Session::builder()?.commit_from_file(path)?;

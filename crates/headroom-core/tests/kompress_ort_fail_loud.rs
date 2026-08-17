@@ -63,5 +63,13 @@ fn from_files_fails_loud_when_onnx_dylib_missing() {
         msg.contains("ORT_DYLIB_PATH") || msg.contains("ONNX Runtime"),
         "expected a loud dylib error naming ORT_DYLIB_PATH / ONNX Runtime, got: {msg}"
     );
+    // The hint must be actionable: point the operator at `set ORT_DYLIB_PATH`
+    // (or `pip install onnxruntime`) so a dev with the cached model knows how
+    // to unblock kompress instead of chasing a deadlock.
+    assert!(
+        msg.contains("set ORT_DYLIB_PATH")
+            && (msg.contains("pip install onnxruntime") || msg.contains("onnxruntime")),
+        "expected an actionable hint naming 'set ORT_DYLIB_PATH', got: {msg}"
+    );
     eprintln!("fail-loud error as expected: {msg}");
 }

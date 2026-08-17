@@ -1093,6 +1093,14 @@ mod tests {
             msg.contains("ORT_DYLIB_PATH") || msg.contains("ONNX Runtime"),
             "expected a loud dylib error, got: {msg}"
         );
+        // The hint must be actionable: name `set ORT_DYLIB_PATH` (or
+        // `pip install onnxruntime`) so a dev with the cached model knows
+        // how to unblock kompress.
+        assert!(
+            msg.contains("set ORT_DYLIB_PATH")
+                && (msg.contains("pip install onnxruntime") || msg.contains("onnxruntime")),
+            "expected an actionable hint naming 'set ORT_DYLIB_PATH', got: {msg}"
+        );
     }
 
     #[test]
