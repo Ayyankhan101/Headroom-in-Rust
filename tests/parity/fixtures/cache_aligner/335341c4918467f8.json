@@ -1,0 +1,64 @@
+{
+  "config": {
+    "collapse_blank_lines": true,
+    "date_patterns": [
+      "Current [Dd]ate:?\\s*\\d{4}-\\d{2}-\\d{2}",
+      "Today is \\w+,?\\s+\\w+ \\d+",
+      "Today's date:?\\s*\\d{4}-\\d{2}-\\d{2}",
+      "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}"
+    ],
+    "detection_tiers": [
+      "regex"
+    ],
+    "dynamic_tail_separator": "\n\n---\n[Dynamic Context]\n",
+    "enabled": false,
+    "entropy_threshold": 0.7,
+    "extra_dynamic_labels": [],
+    "normalize_whitespace": true,
+    "use_dynamic_detector": true
+  },
+  "input": [
+    {
+      "content": "Session token eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMifQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+      "role": "system"
+    },
+    {
+      "content": "Control message three.",
+      "role": "user"
+    }
+  ],
+  "input_sha256": "335341c4918467f871a2826109d765d6b1a07c31c1549e7b4d056bb47616b685",
+  "output": {
+    "cache_metrics": {
+      "prefix_changed": false,
+      "previous_hash": null,
+      "stable_prefix_bytes": 113,
+      "stable_prefix_hash": "cf834f46acc8e9c8",
+      "stable_prefix_tokens_est": 68
+    },
+    "diff_artifact": null,
+    "markers_inserted": [
+      "stable_prefix_hash:cf834f46acc8e9c8"
+    ],
+    "messages": [
+      {
+        "content": "Session token eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMifQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+        "role": "system"
+      },
+      {
+        "content": "Control message three.",
+        "role": "user"
+      }
+    ],
+    "timing": {},
+    "tokens_after": 83,
+    "tokens_before": 83,
+    "transforms_applied": [],
+    "warnings": [
+      "CacheAligner: detected volatile content in system prompt (jwt=1); cache prefix unstable. Move dynamic values out of the system prompt to recover cache hits."
+    ],
+    "waste_signals": null
+  },
+  "recorded_at": "2026-08-17T08:53:46.163956+00:00",
+  "transform": "cache_aligner"
+}

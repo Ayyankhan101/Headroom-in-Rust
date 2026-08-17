@@ -19,46 +19,44 @@
   },
   "input": [
     {
-      "content": "You are a helpful assistant. The date is 2026-04-23. Request id 5.",
+      "content": "Stable system prompt, no volatile content at all.",
       "role": "system"
     },
     {
-      "content": "Question number 5: what is 2+2?",
+      "content": "Control message five.",
       "role": "user"
     }
   ],
-  "input_sha256": "475e76a9f99c29abbaae11133063a5c9d56e923ba7641576fc8af781f8c90231",
+  "input_sha256": "b2348e1807e84b25cee038c74277572cfa81a7cb829e2542b25f518cfb5c1832",
   "output": {
     "cache_metrics": {
-      "prefix_changed": true,
-      "previous_hash": "a81110326e885546",
-      "stable_prefix_bytes": 56,
-      "stable_prefix_hash": "d28bc9575c97a6b5",
-      "stable_prefix_tokens_est": 15
+      "prefix_changed": false,
+      "previous_hash": null,
+      "stable_prefix_bytes": 49,
+      "stable_prefix_hash": "cf377db0fdf5ea59",
+      "stable_prefix_tokens_est": 10
     },
     "diff_artifact": null,
     "markers_inserted": [
-      "stable_prefix_hash:d28bc9575c97a6b5"
+      "stable_prefix_hash:cf377db0fdf5ea59"
     ],
     "messages": [
       {
-        "content": "You are a helpful assistant. The date is . Request id 5.\n\n---\n[Dynamic Context]\n2026-04-23",
+        "content": "Stable system prompt, no volatile content at all.",
         "role": "system"
       },
       {
-        "content": "Question number 5: what is 2+2?",
+        "content": "Control message five.",
         "role": "user"
       }
     ],
     "timing": {},
-    "tokens_after": 51,
-    "tokens_before": 47,
-    "transforms_applied": [
-      "cache_align"
-    ],
+    "tokens_after": 25,
+    "tokens_before": 25,
+    "transforms_applied": [],
     "warnings": [],
     "waste_signals": null
   },
-  "recorded_at": "2026-04-23T23:51:37.780357+00:00",
+  "recorded_at": "2026-08-17T08:53:46.164525+00:00",
   "transform": "cache_aligner"
 }

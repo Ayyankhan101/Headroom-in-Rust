@@ -19,46 +19,46 @@
   },
   "input": [
     {
-      "content": "You are a helpful assistant. The date is 2026-04-23. Request id 8.",
+      "content": "You are a helpful assistant. The date is 2026-08-17. Request id 5.",
       "role": "system"
     },
     {
-      "content": "Question number 8: what is 2+2?",
+      "content": "Question number 5: what is 2+2?",
       "role": "user"
     }
   ],
-  "input_sha256": "231ab237501e106b7c4ef2b8aa3842c31abf201f4f2b8c36166d2ae786f24f83",
+  "input_sha256": "2a540384fa44ebb09c93b6ba6f514b2b77a683d30212fbbd156f3719aa5d52da",
   "output": {
     "cache_metrics": {
-      "prefix_changed": true,
-      "previous_hash": "ae6baf456ddfbff6",
-      "stable_prefix_bytes": 56,
-      "stable_prefix_hash": "f2be38f2730cd5ec",
-      "stable_prefix_tokens_est": 15
+      "prefix_changed": false,
+      "previous_hash": null,
+      "stable_prefix_bytes": 66,
+      "stable_prefix_hash": "d6f2ca0c94ad93ae",
+      "stable_prefix_tokens_est": 22
     },
     "diff_artifact": null,
     "markers_inserted": [
-      "stable_prefix_hash:f2be38f2730cd5ec"
+      "stable_prefix_hash:d6f2ca0c94ad93ae"
     ],
     "messages": [
       {
-        "content": "You are a helpful assistant. The date is . Request id 8.\n\n---\n[Dynamic Context]\n2026-04-23",
+        "content": "You are a helpful assistant. The date is 2026-08-17. Request id 5.",
         "role": "system"
       },
       {
-        "content": "Question number 8: what is 2+2?",
+        "content": "Question number 5: what is 2+2?",
         "role": "user"
       }
     ],
     "timing": {},
-    "tokens_after": 51,
-    "tokens_before": 47,
-    "transforms_applied": [
-      "cache_align"
+    "tokens_after": 45,
+    "tokens_before": 45,
+    "transforms_applied": [],
+    "warnings": [
+      "CacheAligner: detected volatile content in system prompt (iso8601=1); cache prefix unstable. Move dynamic values out of the system prompt to recover cache hits."
     ],
-    "warnings": [],
     "waste_signals": null
   },
-  "recorded_at": "2026-04-23T23:51:37.781924+00:00",
+  "recorded_at": "2026-08-17T08:53:46.158250+00:00",
   "transform": "cache_aligner"
 }
