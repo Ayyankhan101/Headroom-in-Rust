@@ -3384,7 +3384,7 @@ def anthropic_response_to_sse(response: dict[str, Any]) -> list[bytes]:
     path. ``content`` is reconstruction-controlled, so a present-but-null
     value or a non-list is guarded the same way the proxy guarded it.
     """
-        events: list[bytes] = []
+    events: list[bytes] = []
 
     # message_start
     msg_start = {
