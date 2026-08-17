@@ -1,0 +1,352 @@
+# BASELINE — Measured Phase 0 Baseline (Python → Rust conversion)
+
+**Date measured:** 2026-08-17
+**Tree measured:** branch `realign-P0-baseline` @ `bbe90131` (`deps: bump tokio-tungstenite from 0.24.0 to 0.30.0 (#2967)`)
+**Machine:** macOS (arm64), Python 3.13.13 (`.venv`), cargo 1.95.0
+**Plan:** `docs/superpowers/plans/2026-08-14-finish-python-to-rust-conversion.md` (Task 0.1)
+**Owner:** fork maintainer (`Ayyankhan101/Headroom-in-Rust`)
+
+Every number below was **measured from this tree**, not estimated. Later PRs (Phases 1–4) diff against this file as the single source of truth.
+
+---
+
+## 0. Upstream-sync decision (record)
+
+- The plan's Phase 0 preamble records the 2026-08-14 sync: 27 commits, clean fast-forward onto `origin/main`, applied **before** the plan ran (plan docs commit on `realign-H0-doc-finish-python-to-rust-conversion`, whose base is `e269afb9` = `fix(ci): unjam release and Docker publishing (#2958)`).
+- **Decision (2026-08-17, user):** the baseline is measured in the `realign-P0-baseline` worktree, which sits **27 commits ahead** of `e269afb9` on a newer `origin/main`. The worktree's `origin/main` ref resolves to `e269afb9`; the branch head `bbe90131` includes 27 additional upstream commits (e.g. #2964, #2967, #2993, #3009, #3012).
+- **Impact on the plan's recorded numbers:** the delete list differs from the plan's illustrative figures. `headroom/proxy/` changed by **12 files, +1,460/−432** between `e269afb9` and `bbe90131`. The measurements below **supersede** the plan's numbers wherever they differ (notably: proxy 104 files / 49,446 LOC vs the plan's 93 / 28,531; `server.py` 5,943 vs 5,933; handlers 20,212 LOC vs ~20,212 — matches; `headroom/` total 205,536 vs 203,362).
+
+---
+
+## 1. Codebase totals (measured)
+
+| Metric | Value | Command |
+|---|---|---|
+| Python source LOC (`headroom/`) | **205,536** | `find headroom -name '*.py' -exec cat {} + \| wc -l` |
+| Python source modules (`headroom/`) | **521** | `find headroom -name '*.py' \| wc -l` |
+| Python test LOC (`tests/`) | **241,429** | `find tests -name '*.py' -exec cat {} + \| wc -l` |
+| Python test modules (`tests/`) | **804** | `find tests -name '*.py' \| wc -l` |
+| Rust source LOC (`crates/`) | **79,375** | `find crates -name '*.rs' -exec cat {} + \| wc -l` |
+| Rust source modules (`crates/`) | **197** | `find crates -name '*.rs' \| wc -l` |
+| Rust proxy surface (`crates/headroom-proxy/src`) | **51 files / 20,539 LOC** | `find crates/headroom-proxy/src -name '*.rs' \| xargs wc -l \| tail -1` |
+| Request-path Python transforms (`headroom/transforms/`) | **38 files / 23,299 LOC** | `find headroom/transforms -name '*.py'` |
+| `headroom/transforms/cache_aligner.py` | **413 LOC** (detector-only) | `wc -l headroom/transforms/cache_aligner.py` |
+
+---
+
+## 2. Delete-list inventory (Phase 3 source of truth)
+
+### 2.1 `headroom/proxy/` — **104 Python files / 49,446 LOC** (delete whole directory in PR-3.1)
+
+Composition:
+
+| Area | Files | LOC |
+|---|---:|---:|
+| Top-level `headroom/proxy/*.py` | 93 | 28,531 |
+| `headroom/proxy/handlers/` | 8 | 20,212 |
+| `headroom/proxy/interceptors/` | 3 | 703 |
+| **Total** | **104** | **49,446** |
+
+Largest files (measured):
+
+| File | LOC |
+|---|---:|
+| `handlers/openai.py` | 9,930 |
+| `server.py` | 5,943 |
+| `handlers/anthropic.py` | 5,015 |
+| `handlers/streaming.py` | 2,145 |
+| `handlers/gemini.py` | 1,459 |
+| `handlers/batch.py` | 1,289 |
+| `handlers/bedrock.py` | 305 |
+| `handlers/_debug_dump.py` | 47 |
+
+Memory subsystem: **11 files / 4,461 LOC** (`memory_decision.py`, `memory_decision_policy.py`, `memory_golden_policy.py`, `memory_handler.py`, `memory_injection.py`, `memory_injection_mode_policy.py`, `memory_query.py`, `memory_query_policy.py`, `memory_rank_policy.py`, `memory_ranker.py`, `memory_tool_adapter.py`).
+`semantic_cache.py` lives at **`headroom/proxy/semantic_cache.py`** (154 LOC) — not `headroom/semantic_cache.py`.
+
+Full file list (the authoritative Phase 3 delete set for `headroom/proxy/`):
+
+```
+headroom/proxy/__init__.py
+headroom/proxy/audit.py
+headroom/proxy/auth_mode.py
+headroom/proxy/auth_policy.py
+headroom/proxy/background_compression.py
+headroom/proxy/beta_header_merge.py
+headroom/proxy/beta_header_policy.py
+headroom/proxy/body_forwarding.py
+headroom/proxy/budget_basis_policy.py
+headroom/proxy/cc_switch_reconciler.py
+headroom/proxy/ccr_golden_policy.py
+headroom/proxy/ccr_marker_policy.py
+headroom/proxy/ccr_session_tracker.py
+headroom/proxy/compression_decision.py
+headroom/proxy/cost.py
+headroom/proxy/debug_introspection.py
+headroom/proxy/diagnostic_decode_policy.py
+headroom/proxy/extensions.py
+headroom/proxy/forwarded_headers.py
+headroom/proxy/forwarded_policy.py
+headroom/proxy/handlers/__init__.py
+headroom/proxy/handlers/_debug_dump.py
+headroom/proxy/handlers/anthropic.py
+headroom/proxy/handlers/batch.py
+headroom/proxy/handlers/bedrock.py
+headroom/proxy/handlers/gemini.py
+headroom/proxy/handlers/openai.py
+headroom/proxy/handlers/streaming.py
+headroom/proxy/helpers.py
+headroom/proxy/image_compression_decision.py
+headroom/proxy/image_compression_policy.py
+headroom/proxy/image_isolation.py
+headroom/proxy/interceptors/__init__.py
+headroom/proxy/interceptors/astgrep.py
+headroom/proxy/interceptors/base.py
+headroom/proxy/internal_header_policy.py
+headroom/proxy/loop_callback_failure_policy.py
+headroom/proxy/loopback_guard.py
+headroom/proxy/memory_decision.py
+headroom/proxy/memory_decision_policy.py
+headroom/proxy/memory_golden_policy.py
+headroom/proxy/memory_handler.py
+headroom/proxy/memory_injection.py
+headroom/proxy/memory_injection_mode_policy.py
+headroom/proxy/memory_query.py
+headroom/proxy/memory_query_policy.py
+headroom/proxy/memory_rank_policy.py
+headroom/proxy/memory_ranker.py
+headroom/proxy/memory_tool_adapter.py
+headroom/proxy/model_router.py
+headroom/proxy/models.py
+headroom/proxy/modes.py
+headroom/proxy/outcome.py
+headroom/proxy/output_effort_policy.py
+headroom/proxy/output_savings.py
+headroom/proxy/output_savings_policy.py
+headroom/proxy/output_shaper.py
+headroom/proxy/output_steering.py
+headroom/proxy/output_turn_policy.py
+headroom/proxy/output_verbosity_policy.py
+headroom/proxy/passthrough.py
+headroom/proxy/persistent_metrics.py
+headroom/proxy/probe_recorder.py
+headroom/proxy/project_context.py
+headroom/proxy/project_name_policy.py
+headroom/proxy/project_policy.py
+headroom/proxy/prometheus_metrics.py
+headroom/proxy/proxy_mode_policy.py
+headroom/proxy/python_forwarder_mode_policy.py
+headroom/proxy/query_log_policy.py
+headroom/proxy/rate_limit_policy.py
+headroom/proxy/rate_limiter.py
+headroom/proxy/request_limit_policy.py
+headroom/proxy/request_log_redaction_policy.py
+headroom/proxy/request_logger.py
+headroom/proxy/request_scope.py
+headroom/proxy/route_advice.py
+headroom/proxy/runtime_env.py
+headroom/proxy/savings_attribution.py
+headroom/proxy/savings_tracker.py
+headroom/proxy/semantic_cache.py
+headroom/proxy/semantic_cache_key.py
+headroom/proxy/semantic_cache_key_policy.py
+headroom/proxy/server.py
+headroom/proxy/sse_byte_buffer_policy.py
+headroom/proxy/ssl_context.py
+headroom/proxy/stage_timer.py
+headroom/proxy/system_compaction.py
+headroom/proxy/token_counting.py
+headroom/proxy/tool_definition_serialization.py
+headroom/proxy/tool_injection_config.py
+headroom/proxy/tool_injection_logging.py
+headroom/proxy/tool_injection_policy.py
+headroom/proxy/tool_injection_tracker.py
+headroom/proxy/tool_name_policy.py
+headroom/proxy/tool_schema_compaction.py
+headroom/proxy/tool_schema_savings_policy.py
+headroom/proxy/turn_hooks.py
+headroom/proxy/verbosity_controller.py
+headroom/proxy/warmup.py
+headroom/proxy/wire_debug_format_policy.py
+headroom/proxy/wire_debug_redaction_policy.py
+headroom/proxy/ws_headers.py
+headroom/proxy/ws_session_registry.py
+```
+
+### 2.2 Other request-path deletions (PR-3.1 / PR-3.2)
+
+| File | LOC | Phase |
+|---|---:|---|
+| `headroom/backends/litellm.py` | 1,597 | PR-3.2 (keep `base.py` / `anyllm.py` / `__init__.py` — see §3) |
+| `headroom/transforms/cache_aligner.py` | 413 | PR-3.1 (Rust port lands in Phase 1 Task 1.4) |
+| `headroom/transforms/*.py` shims | see §3 | PR-3.1 (request-path subset only) |
+
+### 2.3 Proxy-only tests
+
+- `tests/test_proxy*.py`: **66 files** (top-level)
+- `tests/test_proxy/`: **32 files**
+
+Full list (66 top-level `test_proxy_*.py`):
+
+```
+tests/test_proxy_anthropic_cache_stability.py
+tests/test_proxy_anthropic_compression_diagnostics.py
+tests/test_proxy_anthropic_model_sanitization.py
+tests/test_proxy_batch_integration.py
+tests/test_proxy_byte_faithful_forwarding.py
+tests/test_proxy_cache_telemetry.py
+tests/test_proxy_cache_ttl_metrics.py
+tests/test_proxy_ccr.py
+tests/test_proxy_codex_route_aliases.py
+tests/test_proxy_compress_endpoint.py
+tests/test_proxy_compression_executor.py
+tests/test_proxy_compression_headers.py
+tests/test_proxy_config_qdrant_port.py
+tests/test_proxy_config_rate_limit.py
+tests/test_proxy_copilot_auth_hooks.py
+tests/test_proxy_cors.py
+tests/test_proxy_count_tokens_integration.py
+tests/test_proxy_dashboard_stats_cache.py
+tests/test_proxy_debug_endpoints.py
+tests/test_proxy_disable_kompress.py
+tests/test_proxy_eager_preload_bind.py
+tests/test_proxy_extensions.py
+tests/test_proxy_favicon_route.py
+tests/test_proxy_gemini_integration.py
+tests/test_proxy_gemini_native_integration.py
+tests/test_proxy_google_cloudcode_route_aliases.py
+tests/test_proxy_handler_helpers.py
+tests/test_proxy_handlers_batch.py
+tests/test_proxy_hardening.py
+tests/test_proxy_health.py
+tests/test_proxy_healthchecks.py
+tests/test_proxy_hooks_regression.py
+tests/test_proxy_loop_exception_health.py
+tests/test_proxy_loopback_gating.py
+tests/test_proxy_memory_integration.py
+tests/test_proxy_mode_benchmark.py
+tests/test_proxy_mode_policy.py
+tests/test_proxy_modes.py
+tests/test_proxy_openai.py
+tests/test_proxy_openai_cache_key_integration.py
+tests/test_proxy_openai_cache_stability.py
+tests/test_proxy_openai_responses_bypass.py
+tests/test_proxy_openai_responses_integration.py
+tests/test_proxy_openai_responses_stream_ccr.py
+tests/test_proxy_package_init.py
+tests/test_proxy_passthrough.py
+tests/test_proxy_passthrough_integration.py
+tests/test_proxy_passthrough_transient_retry.py
+tests/test_proxy_per_provider_kompress.py
+tests/test_proxy_pipeline_lifecycle.py
+tests/test_proxy_project_savings.py
+tests/test_proxy_request_scope.py
+tests/test_proxy_retry_429.py
+tests/test_proxy_savings_history.py
+tests/test_proxy_scalability.py
+tests/test_proxy_semantic_cache_key.py
+tests/test_proxy_semantic_cache_key_integration.py
+tests/test_proxy_semantic_cache_key_policy.py
+tests/test_proxy_settings_endpoints.py
+tests/test_proxy_stats_recent_requests.py
+tests/test_proxy_streaming_ratelimit_headers.py
+tests/test_proxy_streaming_request_logger.py
+tests/test_proxy_streaming_resilience.py
+tests/test_proxy_system_prompt_immutable.py
+tests/test_proxy_telemetry_env.py
+tests/test_proxy_warmup.py
+```
+
+`tests/test_proxy/` (32 files): `test_anthropic_buffered_timeout.py`, `test_anthropic_ccr_deferred_injection.py`, `test_anthropic_ccr_raise.py`, `test_anthropic_recount_and_reparse_safety.py`, `test_anthropic_streaming_ccr_retrieve.py`, `test_anthropic_upstream_header.py`, `test_background_compression.py`, `test_bedrock_passthrough.py`, `test_bedrock_sse_ping.py`, `test_cc_switch_reconciler.py`, `test_ccr_frozen_prefix_coupling.py`, `test_compression_failure_action.py`, `test_compression_timeout_config.py`, `test_compute_turn_id.py`, `test_gemini_savings_profile.py`, `test_header_safe_transforms.py`, `test_mcp_stats_aggregation.py`, `test_model_router.py`, `test_model_router_wiring.py`, `test_openai_backend_path.py`, `test_openai_chat_ccr_injection.py`, `test_openai_chat_savings_profile.py`, `test_openai_responses_ccr.py`, `test_openai_stream_usage_option.py`, `test_openai_transport_path_prefix.py`, `test_openai_upstream_header.py`, `test_phase3_byte_identity.py`, `test_request_logger.py`, `test_settings_fresh_process_precedence.py`, `test_settings_store.py`, `test_tool_search_repair_after_turn_hooks.py`, `test_transformations_feed.py`.
+
+> PR-3.1 note: the plan's "keep ~40" surviving tests refers to tests that exercise CLI wrappers, RTK, evals, learn, memory writers, tokenizers — confirm each `test_proxy*` file against the §3 consumer map before deleting; some may exercise surviving modules.
+
+---
+
+## 3. `headroom._core` consumer map (Rust dependency surface)
+
+Modules that import `headroom._core` (measured: `grep -rln "headroom\._core\|headroom._core" headroom/` → 13 modules):
+
+| Module | Classification | Off-path importers (must survive / be updated) |
+|---|---|---|
+| `headroom/__init__.py` | **Survives** | — |
+| `headroom/_ort.py` | **Survives** | imported only by `transforms/content_router.py` |
+| `headroom/cli/update.py` | **Survives** | CLI |
+| `headroom/cli/wrap.py` | **Survives** | CLI (modified in Phases 2/3 — backend switch + spawn) |
+| `headroom/proxy/server.py` | **Deleted PR-3.1** | — |
+| `headroom/transforms/content_router.py` | **Shared — decision needed** | `headroom/evals/__init__.py`, `evals/adversarial_grid.py`, `evals/batch_compression_eval.py`, `evals/runners/compression_only.py`, `evals/runners/before_after.py` |
+| `headroom/transforms/diff_compressor.py` | **Shared — decision needed** | `transforms/__init__.py` (proxy + evals surface) |
+| `headroom/transforms/error_detection.py` | Request-path | imported by `transforms/search_compressor.py` |
+| `headroom/transforms/log_compressor.py` | **Shared — decision needed** | `transforms/__init__.py` |
+| `headroom/transforms/search_compressor.py` | Request-path | `transforms/__init__.py` |
+| `headroom/transforms/smart_crusher.py` | **Shared — decision needed** | `headroom/evals/core.py`, `evals/runners/compression_only.py`, `evals/runners/before_after.py`, `integrations/langchain/langgraph.py`, `integrations/mcp/server.py` |
+| `headroom/transforms/tag_protector.py` | Request-path | none found outside `headroom/proxy/` + `transforms/` |
+| `headroom/transforms/text_crusher.py` | Request-path | none found outside `headroom/proxy/` + `transforms/` |
+
+**Phase 3 implication:** the transform shims are thin delegates to Rust (`headroom._core`); several are imported by **surviving** off-path consumers (`evals/`, `integrations/`). PR-3.1 must either keep those shims or update the off-path consumers — do not delete them blindly. `headroom/_ort.py` survives because `content_router.py` (used by evals) imports it.
+
+Also verified: `headroom/backends/base.py` is imported by surviving `headroom/cache/compression_store.py` and `headroom/telemetry/toin.py` → **keep `backends/base.py`, `anyllm.py`, `__init__.py`** in PR-3.2; delete only `litellm.py`.
+
+---
+
+## 4. Parity baseline (measured `make test-parity`)
+
+Command: `make test-parity` (= `cargo run -p headroom-parity -- run --fixtures tests/parity/fixtures`).
+**Requires `ORT_DYLIB_PATH` on this machine — see Finding F1.**
+
+| Comparator | total | matched | skipped | diffed |
+|---|---:|---:|---:|---:|
+| log_compressor | 20 | 20 | 0 | 0 |
+| diff_compressor | 27 | 27 | 0 | 0 |
+| cache_aligner | 20 | 0 | **20** (stub) | 0 |
+| tokenizer | 40 | 40 | 0 | 0 |
+| ccr | 25 | 0 | **25** (stub) | 0 |
+| smart_crusher | 17 | 17 | 0 | 0 |
+| content_detector | 21 | 21 | 0 | 0 |
+| text_crusher | 6 | 6 | 0 | 0 |
+| kompress | 21 | 21 | 0 | 0 |
+| code_aware_compressor | 30 | 30 | 0 | 0 |
+| **Total** | **227** | **182** | **45** | **0** |
+
+**Exactly the two stubbed comparators skip** (`cache_aligner` 20, `ccr` 25 — both `stub_comparator!` at `crates/headroom-parity/src/lib.rs:179-180`); everything else matches. This matches the plan's Phase 0 Step 3 expectation ("exactly two transforms report skipped for all their fixtures — cache_aligner and ccr — and everything else matched"). The plan's "111 matched / 65 skipped" CI comment is stale relative to this tree (fixture sets and counts have since changed).
+
+### Finding F1 — kompress harness deadlock without an ONNX Runtime dylib
+
+- **Symptom:** with the `kompress-v2-base` ONNX model present in the local HF cache (`~/.cache/huggingface/hub/models--chopratejas--kompress-v2-base`), `parity-run` **hangs indefinitely** on kompress (0% CPU, sleeping in `ort::load_dylib_from_path` → re-entrant `Once` → `semaphore_wait_trap`). The same hang hits `cargo test --workspace` (`tests/kompress_parity.rs`).
+- **Why CI is unaffected:** CI (ubuntu-latest) has no cached model → `hf_cache_file` returns `None` → comparator returns `Err` → fixtures `Skipped` fast, before `Session::builder()` is ever reached. Locally the cached model reaches `build_session` → ort dylib load → deadlock.
+- **Fix (used for all gate runs below):** `pip install onnxruntime` into the venv, then
+  `export ORT_DYLIB_PATH=$PWD/.venv/lib/python3.13/site-packages/onnxruntime/capi/libonnxruntime.1.28.0.dylib`.
+- **Follow-up (not this phase):** make the kompress comparator / `headroom-core` kompress tests fail-loud when the dylib is missing instead of deadlocking (mirror `magika_detector.rs`'s `ORT_DYLIB_PATH` + discovery handling). Any dev machine with the model cached needs this env var; note it in `docs/operations/python-to-rust-migration.md` in Phase 4.
+
+---
+
+## 5. Gate results (Step 4)
+
+| Gate | Command | Result |
+|---|---|---|
+| Rust format | `cargo fmt --all -- --check` | ✅ clean |
+| Rust lint | `cargo clippy --workspace -- -D warnings` | ✅ clean (40.55s) |
+| Rust tests | `cargo test --workspace` (with `ORT_DYLIB_PATH`) | ✅ **1,492 passed / 0 failed** |
+| Python subset (plan list) | `pytest -x test_smart_crusher_bugs.py test_smart_crusher_rust_parity.py test_ccr.py test_acceptance.py` | ✅ **49 passed** (7.94s) |
+| Python subset (full `ci-precheck-python` list) | 11 files incl. relevance/critical_fixes/quality_retention/toin | ✅ **175 passed / 4 skipped** (5.88s) |
+| commitlint | `npx @commitlint/cli --from origin/main --to HEAD` | ⏳ tooling ready: npx (Node v26.5.1) on PATH, `origin/main` fetched @ `e269afb9`; runs at commit time |
+
+Python env used: `.venv` (Python 3.13.13) + `pip install -e .` (maturin-built `headroom._core` extension) + `pytest pytest-asyncio pytest-cov respx httpx onnxruntime`. The 4 skipped pytest tests are pre-existing optional-dependency skips, not regressions.
+
+---
+
+## 6. Phase 0 exit gate — status
+
+- ✅ `cargo test --workspace` green (1,492 passed)
+- ✅ `make test-parity` baseline captured (182 matched / 45 skipped / 0 diffed; skipped = exactly the 2 stubs)
+- ✅ Surviving-Python pytest green (49 passed plan list; 175 passed / 4 skipped full ci-precheck list)
+- ✅ Delete list locked (this file, §2) — measured against `bbe90131`, superseding the plan's illustrative figures
+- ✅ Upstream-sync decision recorded (§0)
+- ✅ `make ci-precheck` components: fmt ✅, clippy ✅, rust tests ✅, python tests ✅, commitlint ⏳ (verified at commit)
+
+## 7. Notes for later phases
+
+1. **`/dashboard` deferred to PR-3.1** (plan Global Constraints): the Python server serves an operator web UI (`/dashboard`, `/settings`, `headroom/dashboard/templates/`) with no Rust equivalent. The PR must decide: document the retirement or port a minimal Rust dashboard.
+2. **`ORT_DYLIB_PATH` is required on dev machines with the kompress model cached** (Finding F1). Add to Phase 2/3 docs and dev setup; fix the deadlock in a follow-up PR.
+3. **Shared transform shims** (`content_router.py`, `smart_crusher.py`, `log_compressor.py`, `diff_compressor.py`) are used by surviving `evals/` + `integrations/` code — PR-3.1 must keep them or update those consumers (§3).
+4. **Phase 3 gate command** `git grep -i "uvicorn\|fastapi\|litellm" headroom/` — expect hits in `headroom/proxy/` + `headroom/backends/` only; clean sweep in PR-3.3.
+5. **Rust-side parity baseline for later phases:** the `tests/parity/fixtures/` tree is the frozen Python output; Phase 3.3 (Q12, greenlit) repurposes `crates/headroom-parity/` → version-parity against these fixtures.
