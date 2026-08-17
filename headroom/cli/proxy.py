@@ -61,7 +61,9 @@ def _rust_proxy_env_mapping(*, host: str, port: int, no_optimize: bool) -> dict[
     """
     out = dict(os.environ)
     out["HEADROOM_PROXY_LISTEN"] = f"{host}:{port}"
-    out["HEADROOM_PROXY_COMPRESSION"] = "1" if not no_optimize else "0"
+    # The Rust binary's clap bool parser accepts `true`/`false` only (not
+    # `1`/`0`) — verified against the built binary. Emit the Rust spellings.
+    out["HEADROOM_PROXY_COMPRESSION"] = "true" if not no_optimize else "false"
     return out
 
 

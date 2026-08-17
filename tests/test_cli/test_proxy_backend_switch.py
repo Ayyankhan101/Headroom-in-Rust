@@ -86,12 +86,14 @@ def test_rust_proxy_env_mapping_maps_cli_flags(monkeypatch, fake_rust_binary):
 
     env = p._rust_proxy_env_mapping(host="127.0.0.1", port=8787, no_optimize=False)
     assert env["HEADROOM_PROXY_LISTEN"] == "127.0.0.1:8787"
-    assert env["HEADROOM_PROXY_COMPRESSION"] == "1"
+    # The Rust binary's clap bool parser accepts `true`/`false` only — a
+    # `1`/`0` value makes it exit 2 at startup (verified against the binary).
+    assert env["HEADROOM_PROXY_COMPRESSION"] == "true"
     assert env["HEADROOM_PROXY_UPSTREAM"] == "http://127.0.0.1:8788"
 
     env_noopt = p._rust_proxy_env_mapping(host="0.0.0.0", port=9000, no_optimize=True)
     assert env_noopt["HEADROOM_PROXY_LISTEN"] == "0.0.0.0:9000"
-    assert env_noopt["HEADROOM_PROXY_COMPRESSION"] == "0"
+    assert env_noopt["HEADROOM_PROXY_COMPRESSION"] == "false"
 
 
 def test_proxy_backend_invalid_value_exits(monkeypatch):
