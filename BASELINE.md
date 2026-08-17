@@ -297,17 +297,17 @@ Command: `make test-parity` (= `cargo run -p headroom-parity -- run --fixtures t
 |---|---:|---:|---:|---:|
 | log_compressor | 20 | 20 | 0 | 0 |
 | diff_compressor | 27 | 27 | 0 | 0 |
-| cache_aligner | 20 | 0 | **20** (stub) | 0 |
+| cache_aligner | 25 | 25 | 0 | 0 |
 | tokenizer | 40 | 40 | 0 | 0 |
-| ccr | 25 | 0 | **25** (stub) | 0 |
+| ccr | 31 | 31 | 0 | 0 |
 | smart_crusher | 17 | 17 | 0 | 0 |
 | content_detector | 21 | 21 | 0 | 0 |
 | text_crusher | 6 | 6 | 0 | 0 |
 | kompress | 21 | 21 | 0 | 0 |
 | code_aware_compressor | 30 | 30 | 0 | 0 |
-| **Total** | **227** | **182** | **45** | **0** |
+| **Total** | **238** | **238** | **0** | **0** |
 
-**Exactly the two stubbed comparators skip** (`cache_aligner` 20, `ccr` 25 — both `stub_comparator!` at `crates/headroom-parity/src/lib.rs:179-180`); everything else matches. This matches the plan's Phase 0 Step 3 expectation ("exactly two transforms report skipped for all their fixtures — cache_aligner and ccr — and everything else matched"). The plan's "111 matched / 65 skipped" CI comment is stale relative to this tree (fixture sets and counts have since changed).
+**Zero `Skipped` on request-path transforms** — the Phase 1 exit gate. `cache_aligner` (25) and `ccr` (31) were promoted from `stub_comparator!` to real comparators in Tasks 1.3/1.4 and now match, and the previously-real comparators still match. The re-recorded fixture sets grew the totals vs. the Phase 0 baseline (cache_aligner 20→25, ccr 25→31, grand total 227→238). The plan's "111 matched / 65 skipped" CI comment is stale relative to this tree.
 
 ### Finding F1 — kompress harness deadlock without an ONNX Runtime dylib
 
@@ -315,6 +315,7 @@ Command: `make test-parity` (= `cargo run -p headroom-parity -- run --fixtures t
 - **Why CI is unaffected:** CI (ubuntu-latest) has no cached model → `hf_cache_file` returns `None` → comparator returns `Err` → fixtures `Skipped` fast, before `Session::builder()` is ever reached. Locally the cached model reaches `build_session` → ort dylib load → deadlock.
 - **Fix (used for all gate runs below):** `pip install onnxruntime` into the venv, then
   `export ORT_DYLIB_PATH=$PWD/.venv/lib/python3.13/site-packages/onnxruntime/capi/libonnxruntime.1.28.0.dylib`.
+- **Confirmed in Task 1.5:** the "slow kompress tail" is this deadlock, not slow inference — without `ORT_DYLIB_PATH` set, `parity-run` and `cargo test --workspace` both stall on kompress indefinitely. With it set, kompress completes (21/21 matched in parity; `kompress_matches_python_fixtures_byte_for_byte` passes in 6.56s under cargo test).
 - **Follow-up (not this phase):** make the kompress comparator / `headroom-core` kompress tests fail-loud when the dylib is missing instead of deadlocking (mirror `magika_detector.rs`'s `ORT_DYLIB_PATH` + discovery handling). Any dev machine with the model cached needs this env var; note it in `docs/operations/python-to-rust-migration.md` in Phase 4.
 
 ---
@@ -325,10 +326,12 @@ Command: `make test-parity` (= `cargo run -p headroom-parity -- run --fixtures t
 |---|---|---|
 | Rust format | `cargo fmt --all -- --check` | ✅ clean |
 | Rust lint | `cargo clippy --workspace -- -D warnings` | ✅ clean (40.55s) |
-| Rust tests | `cargo test --workspace` (with `ORT_DYLIB_PATH`) | ✅ **1,492 passed / 0 failed** |
-| Python subset (plan list) | `pytest -x test_smart_crusher_bugs.py test_smart_crusher_rust_parity.py test_ccr.py test_acceptance.py` | ✅ **49 passed** (7.94s) |
-| Python subset (full `ci-precheck-python` list) | 11 files incl. relevance/critical_fixes/quality_retention/toin | ✅ **175 passed / 4 skipped** (5.88s) |
-| commitlint | `npx @commitlint/cli --from origin/main --to HEAD` | ⏳ tooling ready: npx (Node v26.5.1) on PATH, `origin/main` fetched @ `e269afb9`; runs at commit time |
+| Rust tests | `cargo test --workspace` (with `ORT_DYLIB_PATH`) | ✅ Phase 0: **1,492 passed / 0 failed**; Task 1.5 re-run: **1,512 passed / 0 failed** (kompress parity test now completes in 6.56s with `ORT_DYLIB_PATH`) |
+| Python subset (plan list) | `pytest -x test_smart_crusher_bugs.py test_smart_crusher_rust_parity.py test_ccr.py test_acceptance.py` | ✅ Phase 0: **49 passed** (7.94s) |
+| Python subset (Task 1.5 list) | `pytest -x test_ccr.py test_smart_crusher_rust_parity.py test_acceptance.py` | ✅ **43 passed** (1.96s) |
+| Python subset (full `ci-precheck-python` list) | 11 files incl. relevance/critical_fixes/quality_retention/toin | ✅ Phase 0: **175 passed / 4 skipped** (5.88s) |
+| Parity (Task 1.5) | `make test-parity` (with `ORT_DYLIB_PATH`) | ✅ **238 matched / 0 skipped / 0 diffed** — zero `Skipped` on request-path transforms |
+| commitlint | `npx @commitlint/cli --from origin/main --to HEAD` | ⏳ fails **only** on the 27 upstream-sync commits in `origin/main..HEAD` (104-char headers on `7de35739`/`d6d121e3`, 15 footer-length violations, 1 empty-type merge). All 5 Task 0.1–1.4 commits pass individually; CI's `commitlint` job (wagoid/commitlint-github-action) lints only PR commits, so the sync commits never enter the check once the branch is based on the synced `origin/main`. Verified at commit time. |
 
 Python env used: `.venv` (Python 3.13.13) + `pip install -e .` (maturin-built `headroom._core` extension) + `pytest pytest-asyncio pytest-cov respx httpx onnxruntime`. The 4 skipped pytest tests are pre-existing optional-dependency skips, not regressions.
 
@@ -342,6 +345,15 @@ Python env used: `.venv` (Python 3.13.13) + `pip install -e .` (maturin-built `h
 - ✅ Delete list locked (this file, §2) — measured against `bbe90131`, superseding the plan's illustrative figures
 - ✅ Upstream-sync decision recorded (§0)
 - ✅ `make ci-precheck` components: fmt ✅, clippy ✅, rust tests ✅, python tests ✅, commitlint ⏳ (verified at commit)
+
+## 6b. Phase 1 exit gate — status (Task 1.5, verified 2026-08-17)
+
+- ✅ **`make test-parity` has zero `Skipped` on request-path transforms** — 238/238 matched, 0 skipped, 0 diffed (cache_aligner 25/25, ccr 31/31, kompress 21/21 with `ORT_DYLIB_PATH`)
+- ✅ Per-PR CI gate confirmed live: `parity` job in `.github/workflows/rust.yml:244`, no `continue-on-error`, runs `make test-parity`, fails on `Diff`
+- ✅ `cargo test --workspace` green — 1,512 passed / 0 failed (with `ORT_DYLIB_PATH`; kompress parity test passes in 6.56s)
+- ✅ Python subset green — 43 passed (test_ccr.py + smart_crusher_rust_parity + acceptance)
+- ✅ `make ci-precheck` components: fmt ✅ (after rustfmt fix for Task 1.3/1.4 code), clippy ✅, rust tests ✅, python tests ✅, commitlint fails only on upstream-sync commits (see §5)
+- ⚠️ **Gap found & fixed in Task 1.5:** Tasks 1.3/1.4 shipped un-rustfmt'd code (`ccr/tool_injection.rs`, `cache_aligner.rs`, `headroom-parity/src/lib.rs` tests) — `cargo fmt --all` applied; the fix rides in the Task 1.5 commit.
 
 ## 7. Notes for later phases
 
