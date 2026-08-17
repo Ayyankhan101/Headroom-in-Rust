@@ -1,75 +1,26 @@
-"""Byte-equality shadow gate: Python proxy vs Rust proxy.
+"""Byte-equality shadow gate (retired with PR-3.1).
 
-Boots the two recording mock upstreams, the Python backend, and the Rust
-backend, replays the shadow corpus through both, and asserts every case
-matches — both the sha256 of the upstream-bound request bytes and the
-response bytes returned to the client.
+Phase 2 (plan Task 2.4) proved the Rust proxy forwards byte-identical
+requests/responses vs the Python proxy on the shadow corpus. PR-3.1 deletes
+``headroom.proxy.server`` (the Python backend this gate booted), so the
+comparison no longer has a Python side — the gate now skips with a clear
+message. The runner/``boot_python_backend`` path is kept for archaeology and
+for the git history of the Phase 2 exit gate; it errors if invoked against a
+tree without the Python proxy.
 
-This is the Phase 2 exit gate (plan Task 2.4). It is not part of the default
-``pytest`` run (``testpaths = ["tests"]``); run it explicitly:
-
-    python -m pytest e2e/shadow/test_byte_equality.py -v
-
-Skips (with a clear message) when the release Rust binary is missing or the
-Python proxy dependencies (fastapi) are unavailable.
+Not part of the default ``pytest`` run (``testpaths = ["tests"]``).
 """
 
 from __future__ import annotations
 
-import subprocess
-from collections.abc import Iterator
-from pathlib import Path
-from typing import Any
-
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_RUST_BIN = _REPO_ROOT / "target" / "release" / "headroom-proxy"
 
-pytest.importorskip(
-    "fastapi", reason="Python proxy backend needs fastapi (pip install fastapi uvicorn)"
+pytestmark = pytest.mark.skip(
+    reason="Python proxy retired in PR-3.1 — the python-vs-rust byte-equality "
+    "gate was proven in Phase 2 and has no Python side to compare anymore"
 )
-
-pytestmark = pytest.mark.skipif(
-    not _RUST_BIN.exists(),
-    reason="release Rust proxy binary missing — build it with: cargo build --release -p headroom-proxy",
-)
-
-from .corpus import build_corpus  # noqa: E402
-from .runner import (  # noqa: E402
-    RecordingUpstream,
-    boot_python_backend,
-    boot_rust_backend,
-    run_shadow,
-)
-
-
-@pytest.fixture(scope="module")
-def shadow_env() -> Iterator[dict[str, Any]]:
-    """Boot upstreams + both backends; yield URLs; tear everything down."""
-    upstream_py = RecordingUpstream()
-    upstream_rs = RecordingUpstream()
-    procs: list[subprocess.Popen] = []
-    try:
-        py_proc, py_port = boot_python_backend(upstream_py.url)
-        rs_proc, rs_port = boot_rust_backend(upstream_rs.url, str(_RUST_BIN))
-        procs = [py_proc, rs_proc]
-        yield {
-            "python_url": f"http://127.0.0.1:{py_port}",
-            "rust_url": f"http://127.0.0.1:{rs_port}",
-            "upstream_py": upstream_py,
-            "upstream_rs": upstream_rs,
-        }
-    finally:
-        for proc in procs:
-            if proc.poll() is None:
-                proc.terminate()
-                try:
-                    proc.wait(timeout=8)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-        upstream_py.stop()
-        upstream_rs.stop()
 
 
 def test_shadow_byte_equality(shadow_env: dict[str, Any]) -> None:
