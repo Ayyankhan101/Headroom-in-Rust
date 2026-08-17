@@ -25,7 +25,7 @@ use crate::compression;
 use crate::config::Config;
 use crate::error::ProxyError;
 use crate::headers::{build_forward_request_headers, filter_response_headers};
-use crate::health::{healthz, healthz_upstream, rollout_status};
+use crate::health::{health, healthz, healthz_upstream, rollout_status};
 use crate::websocket::ws_handler;
 // Phase F PR-F1: imported as `classify_auth_mode` to make the call
 // site self-documenting. `AuthMode` is re-exported under the same
@@ -149,14 +149,15 @@ impl AppState {
     }
 }
 
-/// Build the axum app. `/healthz` and `/healthz/upstream` are intercepted;
-/// everything else hits the catch-all forwarder. WebSocket upgrades are
-/// handled inside the catch-all handler when an `Upgrade: websocket` header
-/// is present.
+/// Build the axum app. `/healthz`, `/healthz/upstream`, and `/health` are
+/// intercepted; everything else hits the catch-all forwarder. WebSocket
+/// upgrades are handled inside the catch-all handler when an
+/// `Upgrade: websocket` header is present.
 pub fn build_app(state: AppState) -> Router {
     let mut router = Router::new()
         .route("/healthz", get(healthz))
         .route("/healthz/upstream", get(healthz_upstream))
+        .route("/health", get(health))
         .route("/rollout/status", get(rollout_status))
         // PR-D3: Prometheus scrape endpoint. Renders the global
         // registry in text format. The handler is stateless — no
