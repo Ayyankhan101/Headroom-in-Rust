@@ -1,0 +1,25 @@
+{
+  "config": {},
+  "input": [
+    {
+      "function": {
+        "name": "headroom_retrieve"
+      },
+      "type": "function"
+    }
+  ],
+  "input_sha256": "6031f0afebf45599a5c0d7d8f73fa334070217fe392f8ab152b5c9a64ffef391",
+  "output": [
+    [
+      {
+        "function": {
+          "name": "headroom_retrieve"
+        },
+        "type": "function"
+      }
+    ],
+    false
+  ],
+  "recorded_at": "2026-08-17T08:53:46.168372+00:00",
+  "transform": "ccr"
+}

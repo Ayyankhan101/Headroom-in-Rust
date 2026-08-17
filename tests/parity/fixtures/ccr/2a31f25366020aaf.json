@@ -2,16 +2,14 @@
   "config": {},
   "input": [
     {
-      "description": "desc 22",
-      "name": "other_tool_22"
+      "name": "other_tool"
     }
   ],
-  "input_sha256": "1e13216df83b1b242e602e061752778811c4303a567abe718681754dc0e7ff1e",
+  "input_sha256": "2a31f25366020aafcb1d38070c67663f00e546902162c58c8fd7aa641fe97321",
   "output": [
     [
       {
-        "description": "desc 22",
-        "name": "other_tool_22"
+        "name": "other_tool"
       },
       {
         "description": "Retrieve original uncompressed content that was compressed to save tokens. Use this when you need more data than what's shown in compressed tool results. The hash is provided in compression markers like [N items compressed... hash=abc123].",
@@ -32,6 +30,6 @@
     ],
     true
   ],
-  "recorded_at": "2026-08-17T08:53:46.167449+00:00",
+  "recorded_at": "2026-08-17T08:53:46.167958+00:00",
   "transform": "ccr"
 }
