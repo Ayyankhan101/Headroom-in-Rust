@@ -88,7 +88,9 @@ fn split_tokens(content: &str) -> Vec<String> {
     if content.is_empty() {
         return Vec::new();
     }
-    const STRIP: &[char] = &['.', ',', ';', ':', '!', '?', '"', '\'', '(', ')', '[', ']', '{', '}', '<', '>'];
+    const STRIP: &[char] = &[
+        '.', ',', ';', ':', '!', '?', '"', '\'', '(', ')', '[', ']', '{', '}', '<', '>',
+    ];
     content
         .split_whitespace()
         .filter_map(|raw| {
@@ -144,9 +146,16 @@ fn is_iso8601(token: &str) -> bool {
     if !bytes.contains(&b'T') && !bytes.contains(&b't') && !bytes.contains(&b'-') {
         return false;
     }
-    let digit = |r: std::ops::Range<usize>| bytes.get(r).map(|s| s.iter().all(u8::is_ascii_digit)) == Some(true);
+    let digit = |r: std::ops::Range<usize>| {
+        bytes.get(r).map(|s| s.iter().all(u8::is_ascii_digit)) == Some(true)
+    };
     // date part: YYYY-MM-DD (ranges validated like `fromisoformat`).
-    if !(digit(0..4) && bytes.get(4) == Some(&b'-') && digit(5..7) && bytes.get(7) == Some(&b'-') && digit(8..10)) {
+    if !(digit(0..4)
+        && bytes.get(4) == Some(&b'-')
+        && digit(5..7)
+        && bytes.get(7) == Some(&b'-')
+        && digit(8..10))
+    {
         return false;
     }
     let two = |r: std::ops::Range<usize>| -> Option<u8> {
@@ -281,7 +290,14 @@ fn truncate_sample(token: &str) -> String {
         return token.to_string();
     }
     let head: String = chars.iter().take(8).collect();
-    let tail: String = chars.iter().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect();
+    let tail: String = chars
+        .iter()
+        .rev()
+        .take(4)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
     format!("{head}...{tail}")
 }
 
@@ -387,7 +403,11 @@ fn count_message(count_text: &dyn Fn(&str) -> usize, msg: &Value) -> usize {
 /// `OpenAITokenCounter.count_messages` (sum of per-message counts plus 3
 /// priming tokens).
 fn count_messages(count_text: &dyn Fn(&str) -> usize, messages: &[Value]) -> usize {
-    messages.iter().map(|m| count_message(count_text, m)).sum::<usize>() + 3
+    messages
+        .iter()
+        .map(|m| count_message(count_text, m))
+        .sum::<usize>()
+        + 3
 }
 
 /// Run the detector-only transform. `count_text` is injected so the
@@ -432,10 +452,19 @@ mod tests {
 
     #[test]
     fn classifies_uuid_any_version() {
-        assert_eq!(classify("123e4567-e89b-12d3-a456-426614174000"), Some(LABEL_UUID));
-        assert_eq!(classify("550e8400-e29b-41d4-a716-446655440000"), Some(LABEL_UUID));
+        assert_eq!(
+            classify("123e4567-e89b-12d3-a456-426614174000"),
+            Some(LABEL_UUID)
+        );
+        assert_eq!(
+            classify("550e8400-e29b-41d4-a716-446655440000"),
+            Some(LABEL_UUID)
+        );
         // Dashless 32-hex form is a hex hash, not a UUID (Python parity).
-        assert_eq!(classify("550e8400e29b41d4a716446655440000"), Some(LABEL_HEX_HASH));
+        assert_eq!(
+            classify("550e8400e29b41d4a716446655440000"),
+            Some(LABEL_HEX_HASH)
+        );
         // Bad hyphen position is not a UUID.
         assert_eq!(classify("123e4567e89b-12d3-a456-426614174000"), None);
     }
@@ -464,9 +493,18 @@ mod tests {
 
     #[test]
     fn classifies_hex_hashes_by_length() {
-        assert_eq!(classify("9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"), Some(LABEL_HEX_HASH));
-        assert_eq!(classify("0beec7b5ea3f0fdbc95d0dd47f3c5bc275da8a33"), Some(LABEL_HEX_HASH));
-        assert_eq!(classify("d41d8cd98f00b204e9800998ecf8427e"), Some(LABEL_HEX_HASH));
+        assert_eq!(
+            classify("9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"),
+            Some(LABEL_HEX_HASH)
+        );
+        assert_eq!(
+            classify("0beec7b5ea3f0fdbc95d0dd47f3c5bc275da8a33"),
+            Some(LABEL_HEX_HASH)
+        );
+        assert_eq!(
+            classify("d41d8cd98f00b204e9800998ecf8427e"),
+            Some(LABEL_HEX_HASH)
+        );
         // Non-hex char breaks the hash classification.
         assert_eq!(classify("d41d8cd98f00b204e9800998ecf8427g"), None);
     }
@@ -504,7 +542,9 @@ mod tests {
 
     #[test]
     fn stable_content_yields_no_warnings() {
-        let messages = vec![serde_json::json!({"role": "system", "content": "Stable system prompt, no volatile content at all."})];
+        let messages = vec![
+            serde_json::json!({"role": "system", "content": "Stable system prompt, no volatile content at all."}),
+        ];
         assert!(detect_warnings(&messages).is_empty());
     }
 
@@ -529,11 +569,22 @@ mod tests {
 
     #[test]
     fn detection_never_mutates_messages() {
-        let messages = vec![serde_json::json!({"role": "system", "content": "UUID 123e4567-e89b-12d3-a456-426614174000."})];
+        let messages = vec![
+            serde_json::json!({"role": "system", "content": "UUID 123e4567-e89b-12d3-a456-426614174000."}),
+        ];
         let count = |_: &str| 0usize;
         let result = detect_cache_volatility(&messages, count);
-        assert_eq!(result.messages, messages, "messages must round-trip unchanged");
-        assert_eq!(result.markers_inserted, vec![format!("stable_prefix_hash:{}", result.cache_metrics.stable_prefix_hash)]);
+        assert_eq!(
+            result.messages, messages,
+            "messages must round-trip unchanged"
+        );
+        assert_eq!(
+            result.markers_inserted,
+            vec![format!(
+                "stable_prefix_hash:{}",
+                result.cache_metrics.stable_prefix_hash
+            )]
+        );
         assert_eq!(result.cache_metrics.previous_hash, None);
         assert!(!result.cache_metrics.prefix_changed);
     }

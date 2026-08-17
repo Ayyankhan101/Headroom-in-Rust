@@ -61,10 +61,7 @@ fn is_retrieve_tool(tool: &Value) -> bool {
 /// result as Python's no-marker, non-sticky path.
 ///
 /// Returns `(updated_tools, was_injected)`.
-pub fn inject_retrieve_tool(
-    tools: &[Value],
-    session_has_done_ccr: bool,
-) -> (Vec<Value>, bool) {
+pub fn inject_retrieve_tool(tools: &[Value], session_has_done_ccr: bool) -> (Vec<Value>, bool) {
     if !session_has_done_ccr {
         return (tools.to_vec(), false);
     }
@@ -125,7 +122,10 @@ mod tests {
         let tools = vec![json!({"name": CCR_TOOL_NAME})];
         let (updated, injected) = inject_retrieve_tool(&tools, true);
         assert!(!injected);
-        assert_eq!(updated, tools, "already-present tool must not be duplicated");
+        assert_eq!(
+            updated, tools,
+            "already-present tool must not be duplicated"
+        );
     }
 
     #[test]

@@ -998,8 +998,14 @@ mod tests {
             report.total(),
             "all ccr fixtures must match, got {report:?}"
         );
-        assert!(report.skipped.is_empty(), "ccr fixtures must not skip: {report:?}");
-        assert!(report.diffed.is_empty(), "ccr fixtures must not diff: {report:?}");
+        assert!(
+            report.skipped.is_empty(),
+            "ccr fixtures must not skip: {report:?}"
+        );
+        assert!(
+            report.diffed.is_empty(),
+            "ccr fixtures must not diff: {report:?}"
+        );
         assert!(report.total() > 0, "expected ccr fixtures on disk");
     }
 
@@ -1057,7 +1063,10 @@ mod tests {
             report.diffed.is_empty(),
             "cache_aligner fixtures must not diff: {report:?}"
         );
-        assert!(report.total() > 0, "expected cache_aligner fixtures on disk");
+        assert!(
+            report.total() > 0,
+            "expected cache_aligner fixtures on disk"
+        );
     }
 
     /// Minimal tempdir helper to avoid a dev-dependency on `tempfile`.
