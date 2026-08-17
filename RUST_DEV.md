@@ -177,6 +177,29 @@ macos-x86_64 wheels via `PyO3/maturin-action` and uploads them as artifacts.
   test** (`harness_reports_diff_for_divergent_comparator`) proving the
   harness detects mismatched output before any real port lands.
 
+### Kompress needs `ORT_DYLIB_PATH` (BASELINE.md Finding F1)
+
+If the `kompress-v2-base` ONNX model is in the local HuggingFace cache
+(`~/.cache/huggingface/hub/models--chopratejas--kompress-v2-base`), the
+kompress comparator loads the model from disk — and needs the ONNX Runtime
+dylib resolved first. Without it, `make test-parity` and `cargo test
+--workspace` used to **hang indefinitely** at 0% CPU (ort dylib-load
+deadlock). The code now fails loud with an `ONNX Runtime unavailable`
+error instead, but the env var is still required for kompress to actually
+run:
+
+```bash
+pip install onnxruntime
+# adjust the version suffix to whatever pip installed:
+export ORT_DYLIB_PATH=$PWD/.venv/lib/python3.13/site-packages/onnxruntime/capi/libonnxruntime.1.28.0.dylib
+make test-parity
+```
+
+CI sets `ORT_DYLIB_PATH` itself (`.github/workflows/rust.yml`, "Provide
+ONNX Runtime dylib" step), so this is a local-dev-machine concern only.
+See `BASELINE.md` Finding F1 and
+`docs/operations/python-to-rust-migration.md` for the full writeup.
+
 ### Recording fresh fixtures
 
 ```bash
