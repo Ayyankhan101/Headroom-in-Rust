@@ -84,6 +84,29 @@ is:
 - The byte-faithful passthrough invariant: any request the proxy does not
   intend to modify reaches upstream byte-equal.
 
+## Local development: kompress parity harness needs `ORT_DYLIB_PATH`
+
+If the `kompress-v2-base` ONNX model is present in the local HuggingFace
+cache (`~/.cache/huggingface/hub/models--chopratejas--kompress-v2-base`),
+`make test-parity` and `cargo test --workspace` **hang indefinitely** on the
+kompress comparator unless the ONNX Runtime dylib path is exported — 0% CPU,
+sleeping in `ort::load_dylib_from_path` (re-entrant `Once` deadlock). CI is
+unaffected (no cached model → kompress fixtures skip fast); this only bites
+developer machines with the model downloaded.
+
+Fix (install `onnxruntime` into the venv once, then export per shell):
+
+```bash
+pip install onnxruntime
+# adjust the version suffix to whatever pip installed:
+export ORT_DYLIB_PATH=$PWD/.venv/lib/python3.13/site-packages/onnxruntime/capi/libonnxruntime.1.28.0.dylib
+make test-parity        # or: cargo test --workspace
+```
+
+Without it, kompress looks like a slow tail but never finishes. Tracked as
+Finding F1 in `BASELINE.md`; the eventual fix is to fail loud instead of
+deadlocking when the dylib is missing.
+
 ## Questions?
 
 See `docs/superpowers/specs/2026-08-14-python-to-rust-current-state-analysis.md`
