@@ -104,8 +104,10 @@ make test-parity        # or: cargo test --workspace
 ```
 
 Without it, kompress looks like a slow tail but never finishes. Tracked as
-Finding F1 in `BASELINE.md`; the eventual fix is to fail loud instead of
-deadlocking when the dylib is missing.
+Finding F1 in `BASELINE.md`. Since 2026-08-17 the failure mode is a loud
+error instead of a hang (the session builder runs the same ort dylib guard
+magika uses and returns "ONNX Runtime unavailable: ... set ORT_DYLIB_PATH"),
+but the env var is still required for kompress parity to actually run.
 
 ## Questions?
 
