@@ -1,10 +1,10 @@
 //! Parity harness: load JSON fixtures recorded from the Python implementation,
 //! run the Rust port, and compare outputs.
 //!
-//! Six of the eight comparators are real: `log_compressor`, `diff_compressor`,
-//! `tokenizer`, `smart_crusher`, `content_detector`, `text_crusher`. Two remain
-//! stubs and report `Skipped` — see the `stub_comparator!` block below for what
-//! each is waiting on.
+//! Seven of the eight comparators are real: `log_compressor`, `diff_compressor`,
+//! `tokenizer`, `smart_crusher`, `content_detector`, `text_crusher`, `ccr`. One
+//! remains a stub (`cache_aligner`) and reports `Skipped` — see the
+//! `stub_comparator!` block below for what it is waiting on.
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -149,14 +149,11 @@ pub fn run_comparator(dir: &Path, comparator: &dyn TransformComparator) -> Resul
 // --- Built-in comparator stubs ---------------------------------------------
 //
 // These return `Err`, which the harness turns into `Skipped` rather than a
-// panic or a diff — so a stubbed comparator cannot fail the parity gate. Both
-// are blocked on missing Rust surface, not on wiring:
+// panic or a diff — so a stubbed comparator cannot fail the parity gate. The
+// remaining stub is blocked on missing Rust surface, not on wiring:
 //
-// * `cache_aligner` — needs the volatile-content detector, which lives in
-//   `headroom-proxy` while this crate depends only on `headroom-core`. Either
-//   add the dependency or move the detector down into core.
-// * `ccr` — the fixtures compare `ccr_retrieve` tool-definition injection
-//   (`headroom/ccr/tool_injection.py`), which has no Rust port at all.
+// * `cache_aligner` — needs the volatile-content detector ported from
+//   `headroom/transforms/cache_aligner.py` into `headroom-core`.
 
 macro_rules! stub_comparator {
     ($ty:ident, $name:literal) => {
@@ -177,7 +174,44 @@ macro_rules! stub_comparator {
 }
 
 stub_comparator!(CacheAlignerComparator, "cache_aligner");
-stub_comparator!(CcrComparator, "ccr");
+
+/// Real comparator for the `ccr` transform. Fixture input is a tools
+/// array (or `null` — the recorder's `tools=None` sticky case); output
+/// is the 2-element JSON array `[tools_with_injected, bool]` that
+/// Python's tuple `(updated_tools, was_injected)` serialized to.
+///
+/// Matches the sticky-on path: `session_has_done_ccr=True` so the tool
+/// is injected even when the input carries no compression markers. The
+/// fixtures were re-recorded with provider="anthropic" for every case
+/// (the fixture `config` is `{}`, so a comparator cannot know the
+/// provider), which is the definition this comparator emits.
+pub struct CcrComparator;
+
+impl TransformComparator for CcrComparator {
+    fn name(&self) -> &str {
+        "ccr"
+    }
+
+    fn run(
+        &self,
+        input: &serde_json::Value,
+        _config: &serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        use headroom_core::ccr::tool_injection::inject_retrieve_tool;
+
+        // `tools=None` is recorded as JSON `null`; Python injects into a
+        // fresh list, so treat null as an empty tools array.
+        let tools: Vec<serde_json::Value> = match input {
+            serde_json::Value::Null => Vec::new(),
+            _ => input
+                .as_array()
+                .context("ccr fixture input must be a JSON array of tools")?
+                .clone(),
+        };
+        let (updated, injected) = inject_retrieve_tool(&tools, true);
+        Ok(serde_json::json!([updated, injected]))
+    }
+}
 
 /// Real comparator for the `log_compressor` transform.
 ///
@@ -930,6 +964,20 @@ mod tests {
         let report = run_comparator(tmp.path(), &FakeAgreeing).unwrap();
         assert_eq!(report.matched, 1);
         assert!(report.is_clean());
+    }
+
+    #[test]
+    fn ccr_comparator_matches_recorded_fixture() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/parity/fixtures");
+        let report = run_comparator(&dir, &CcrComparator).unwrap();
+        assert_eq!(
+            report.matched,
+            report.total(),
+            "all ccr fixtures must match, got {report:?}"
+        );
+        assert!(report.skipped.is_empty(), "ccr fixtures must not skip: {report:?}");
+        assert!(report.diffed.is_empty(), "ccr fixtures must not diff: {report:?}");
+        assert!(report.total() > 0, "expected ccr fixtures on disk");
     }
 
     #[test]
