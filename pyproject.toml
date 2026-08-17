@@ -69,10 +69,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Proxy server (most common install: pip install headroom-ai[proxy])
+# Proxy server deps (most common install: pip install headroom-ai[proxy]).
+# PR-3.1: the Python FastAPI proxy was retired — `headroom proxy` and `wrap`
+# now run the Rust `headroom-proxy` binary, so fastapi/uvicorn are no longer
+# proxy runtime deps (they stay in `[dev]` for the parity harness and tests).
 proxy = [
-    "fastapi>=0.100.0",
-    "uvicorn>=0.23.0,<1.0",
     # LiteLLM provider backends (e.g. openrouter) expect orjson at runtime but
     # litellm only declares it under its own [proxy] extra (GH #2056).
     "orjson>=3.9.14; platform_python_implementation != 'PyPy'",

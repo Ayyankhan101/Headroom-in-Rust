@@ -3534,3 +3534,8 @@ def anthropic_response_to_sse(response: dict[str, Any]) -> list[bytes]:
         "usage": {"output_tokens": usage.get("output_tokens", 0)},
     }
     events.append(f"event: message_delta\ndata: {json.dumps(msg_delta)}\n\n".encode())
+
+    # message_stop
+    events.append(b'event: message_stop\ndata: {"type": "message_stop"}\n\n')
+
+    return events

@@ -42,13 +42,3 @@ def test_every_litellm_requirement_is_skipped_on_py314() -> None:
         assert r.marker.evaluate({"python_version": "3.13"}), (
             f"{r}: must still install on Python 3.13"
         )
-
-
-def test_proxy_cost_degrades_without_litellm(monkeypatch: pytest.MonkeyPatch) -> None:
-    # With litellm absent (its state on 3.14), the proxy cost path must return
-    # None rather than raise.
-    from headroom.proxy import cost
-
-    monkeypatch.setattr(cost, "LITELLM_AVAILABLE", False)
-    monkeypatch.setattr(cost, "litellm", None)
-    assert cost._get_litellm_module() is None
