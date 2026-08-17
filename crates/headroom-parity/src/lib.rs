@@ -687,7 +687,7 @@ impl TransformComparator for TextCrusherComparator {
 /// pure joined kept-word stream (the Rust engine never emits the Python
 /// inline CCR marker; live-zone CCR uses the `<<ccr:>>` convention).
 pub struct KompressComparator {
-    model: std::sync::OnceLock<Option<headroom_core::transforms::kompress::Kompress>>,
+    model: std::sync::OnceLock<Result<headroom_core::transforms::kompress::Kompress, String>>,
 }
 
 impl Default for KompressComparator {
@@ -721,21 +721,28 @@ impl KompressComparator {
         None
     }
 
-    fn model(&self) -> Option<&headroom_core::transforms::kompress::Kompress> {
-        self.model
-            .get_or_init(|| {
-                use headroom_core::transforms::kompress::{Kompress, KompressConfig};
-                let tok = Self::hf_cache_file(
-                    "models--answerdotai--ModernBERT-base",
-                    &["tokenizer.json"],
-                )?;
-                let onnx = Self::hf_cache_file(
-                    "models--chopratejas--kompress-v2-base",
-                    &["onnx", "kompress-int8-wo.onnx"],
-                )?;
-                Kompress::from_files(&tok, &onnx, KompressConfig::default()).ok()
-            })
-            .as_ref()
+    /// Load the kompress model once, preserving the load error so the
+    /// harness's Skipped reason names the real cause (e.g. a missing ONNX
+    /// Runtime dylib — BASELINE.md Finding F1) instead of a generic cache
+    /// miss.
+    fn model(&self) -> &Result<headroom_core::transforms::kompress::Kompress, String> {
+        self.model.get_or_init(|| {
+            use headroom_core::transforms::kompress::{Kompress, KompressConfig};
+            let tok =
+                Self::hf_cache_file("models--answerdotai--ModernBERT-base", &["tokenizer.json"])
+                    .ok_or_else(|| {
+                        "kompress tokenizer.json not in local HF cache (fixture skipped)"
+                            .to_string()
+                    })?;
+            let onnx = Self::hf_cache_file(
+                "models--chopratejas--kompress-v2-base",
+                &["onnx", "kompress-int8-wo.onnx"],
+            )
+            .ok_or_else(|| {
+                "kompress kompress-int8-wo.onnx not in local HF cache (fixture skipped)".to_string()
+            })?;
+            Kompress::from_files(&tok, &onnx, KompressConfig::default()).map_err(|e| e.to_string())
+        })
     }
 }
 
@@ -754,7 +761,8 @@ impl TransformComparator for KompressComparator {
             .context("kompress fixture input must be a JSON string")?;
         let model = self
             .model()
-            .context("kompress model/tokenizer not in local HF cache (fixture skipped)")?;
+            .as_ref()
+            .map_err(|reason| anyhow::anyhow!("kompress unavailable: {reason}"))?;
         let r = model.compress(content);
         Ok(serde_json::json!({
             "compressed": r.compressed,
@@ -1044,6 +1052,47 @@ mod tests {
         let report = run_comparator(tmp.path(), &AlwaysErr).unwrap();
         assert_eq!(report.skipped.len(), 1);
         assert_eq!(report.matched, 0);
+    }
+
+    #[test]
+    fn kompress_comparator_fails_loud_when_dylib_missing() {
+        // Guard: only run where the model is cached (CI has no model → skip,
+        // matching `tests/kompress_parity.rs`). The failure mode we are
+        // guarding: model cached + ONNX Runtime dylib missing → the
+        // comparator must surface the dylib error (BASELINE.md F1), not
+        // hang and not misreport as "not in cache".
+        let has_tokenizer = KompressComparator::hf_cache_file(
+            "models--answerdotai--ModernBERT-base",
+            &["tokenizer.json"],
+        )
+        .is_some();
+        let has_onnx = KompressComparator::hf_cache_file(
+            "models--chopratejas--kompress-v2-base",
+            &["onnx", "kompress-int8-wo.onnx"],
+        )
+        .is_some();
+        if !(has_tokenizer && has_onnx) {
+            eprintln!("SKIP: kompress model/tokenizer not in HF cache");
+            return;
+        }
+
+        // Fresh test-binary process → the ort loader guard has not run yet,
+        // so a bogus path is honored and the guard fails loudly before any
+        // ort API is touched.
+        std::env::set_var("ORT_DYLIB_PATH", "/nonexistent/onnxruntime.dylib");
+
+        let comp = KompressComparator::new();
+        let err = comp
+            .run(
+                &serde_json::json!("some sufficiently long input text to compress"),
+                &serde_json::json!({}),
+            )
+            .unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("ORT_DYLIB_PATH") || msg.contains("ONNX Runtime"),
+            "expected a loud dylib error, got: {msg}"
+        );
     }
 
     #[test]

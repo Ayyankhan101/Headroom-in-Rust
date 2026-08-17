@@ -316,7 +316,7 @@ Command: `make test-parity` (= `cargo run -p headroom-parity -- run --fixtures t
 - **Fix (used for all gate runs below):** `pip install onnxruntime` into the venv, then
   `export ORT_DYLIB_PATH=$PWD/.venv/lib/python3.13/site-packages/onnxruntime/capi/libonnxruntime.1.28.0.dylib`.
 - **Confirmed in Task 1.5:** the "slow kompress tail" is this deadlock, not slow inference — without `ORT_DYLIB_PATH` set, `parity-run` and `cargo test --workspace` both stall on kompress indefinitely. With it set, kompress completes (21/21 matched in parity; `kompress_matches_python_fixtures_byte_for_byte` passes in 6.56s under cargo test).
-- **Follow-up (not this phase):** make the kompress comparator / `headroom-core` kompress tests fail-loud when the dylib is missing instead of deadlocking (mirror `magika_detector.rs`'s `ORT_DYLIB_PATH` + discovery handling). Any dev machine with the model cached needs this env var; note it in `docs/operations/python-to-rust-migration.md` in Phase 4.
+- **Resolved (2026-08-17):** `Kompress::from_files`'s session builder now runs the same ort dylib guard magika uses (`magika_detector::dynamic_ort_loader_ready`) before any ort API is touched, so a missing dylib surfaces as a loud `Err` ("ONNX Runtime unavailable: ... set ORT_DYLIB_PATH") instead of a 0%-CPU hang. `KompressComparator` propagates that error as the Skipped reason. Regression tests: `crates/headroom-core/tests/kompress_ort_fail_loud.rs` and `kompress_comparator_fails_loud_when_dylib_missing` in `crates/headroom-parity`. Any dev machine with the model cached still needs the env var (documented in `docs/operations/python-to-rust-migration.md`), but the failure mode is now a clear error, not a hang.
 
 ---
 
