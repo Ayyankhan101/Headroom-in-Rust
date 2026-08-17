@@ -1084,9 +1084,9 @@ class StreamingCCRHandler:
         to chunk the response more granularly.
         """
         if self.provider == "anthropic":
-            from headroom.proxy.handlers.streaming import StreamingMixin
+            from headroom.proxy.helpers import anthropic_response_to_sse
 
-            for chunk in StreamingMixin()._response_to_sse(response, "anthropic"):
+            for chunk in anthropic_response_to_sse(response):
                 yield chunk
         else:
             # OpenAI SSE format: `chat.completion.chunk` frames, then [DONE].

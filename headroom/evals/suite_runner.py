@@ -275,8 +275,10 @@ def _start_proxy(port: int) -> subprocess.Popen | None:
     """Start Headroom proxy as a subprocess. Returns process handle."""
     logger.info(f"Starting Headroom proxy on port {port}...")
     try:
+        # PR-3.1: the Python proxy server is retired; `headroom proxy` now
+        # always spawns the Rust `headroom-proxy` binary.
         proc = subprocess.Popen(
-            [sys.executable, "-m", "headroom.proxy.server", "--port", str(port)],
+            [sys.executable, "-m", "headroom.cli", "proxy", "--port", str(port)],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )

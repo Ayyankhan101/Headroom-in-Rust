@@ -1,9 +1,11 @@
-"""Tests for the `HEADROOM_PROXY_BACKEND` switch in `headroom proxy`.
+"""Tests for the always-Rust `headroom proxy` (Phase 3 Task 3.1).
 
-Phase 2 Task 2.1: when `HEADROOM_PROXY_BACKEND=rust`, `headroom proxy`
-spawns the Rust `headroom-proxy` binary (with flags mapped onto its env
-surface) and does NOT import the Python `headroom.proxy.server` request
-path. When `python` (default) or unset, behavior is unchanged.
+The Python FastAPI proxy was retired in PR-3.1: `headroom proxy` now
+always spawns the Rust `headroom-proxy` binary (with flags mapped onto its
+env surface) and never imports the Python `headroom.proxy.server` request
+path. The `HEADROOM_PROXY_BACKEND` switch from the Phase 2 canary is gone;
+`HEADROOM_PROXY_BACKEND_BIN` survives as an operator override for the
+binary path.
 """
 
 import builtins
@@ -23,9 +25,8 @@ def fake_rust_binary(tmp_path):
     return str(fake_bin)
 
 
-def test_proxy_backend_rust_spawns_binary(monkeypatch, fake_rust_binary):
-    """`HEADROOM_PROXY_BACKEND=rust` spawns the Rust binary, not run_server."""
-    monkeypatch.setenv("HEADROOM_PROXY_BACKEND", "rust")
+def test_proxy_spawns_rust_binary(monkeypatch, fake_rust_binary):
+    """`headroom proxy` always spawns the Rust binary, not run_server."""
     monkeypatch.setenv("HEADROOM_PROXY_BACKEND_BIN", fake_rust_binary)
 
     # Replace spawn + readiness polling with capture.
@@ -44,9 +45,8 @@ def test_proxy_backend_rust_spawns_binary(monkeypatch, fake_rust_binary):
     assert "--port" not in spawned["cmd"]
 
 
-def test_proxy_backend_rust_does_not_import_python_server(monkeypatch, fake_rust_binary):
-    """The rust branch must not import `headroom.proxy.server`."""
-    monkeypatch.setenv("HEADROOM_PROXY_BACKEND", "rust")
+def test_proxy_does_not_import_python_server(monkeypatch, fake_rust_binary):
+    """The rust path must not import `headroom.proxy.server`."""
     monkeypatch.setenv("HEADROOM_PROXY_BACKEND_BIN", fake_rust_binary)
 
     import headroom.cli.proxy as p
@@ -58,13 +58,13 @@ def test_proxy_backend_rust_does_not_import_python_server(monkeypatch, fake_rust
         return object()
 
     monkeypatch.setattr(p, "_spawn_rust_proxy", fake_spawn)
-    # Poison the Python server import: if the rust branch ever imports it,
+    # Poison the Python server import: if the rust path ever imports it,
     # the invoke raises instead of spawning.
     real_import = builtins.__import__
 
     def guarded_import(name, *args, **kwargs):
         if name == "headroom.proxy.server" or name.startswith("headroom.proxy.server."):
-            raise AssertionError("rust backend must not import headroom.proxy.server")
+            raise AssertionError("rust proxy must not import headroom.proxy.server")
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", guarded_import)
@@ -77,7 +77,6 @@ def test_proxy_backend_rust_does_not_import_python_server(monkeypatch, fake_rust
 
 def test_rust_proxy_env_mapping_maps_cli_flags(monkeypatch, fake_rust_binary):
     """CLI flags map onto the Rust env surface (listen + compression)."""
-    monkeypatch.setenv("HEADROOM_PROXY_BACKEND", "rust")
     monkeypatch.setenv("HEADROOM_PROXY_BACKEND_BIN", fake_rust_binary)
     # A pre-existing env var must survive the mapping (pass-through base).
     monkeypatch.setenv("HEADROOM_PROXY_UPSTREAM", "http://127.0.0.1:8788")
@@ -96,14 +95,10 @@ def test_rust_proxy_env_mapping_maps_cli_flags(monkeypatch, fake_rust_binary):
     assert env_noopt["HEADROOM_PROXY_COMPRESSION"] == "false"
 
 
-def test_proxy_backend_invalid_value_exits(monkeypatch):
-    """A value other than python/rust is a hard error (exit 2)."""
-    monkeypatch.setenv("HEADROOM_PROXY_BACKEND", "swift")
-
-    import headroom.cli.proxy as p
-
-    monkeypatch.setattr(p, "_spawn_rust_proxy", lambda cmd, **kw: object())
-
+def test_proxy_missing_binary_exits(monkeypatch, tmp_path):
+    """A missing Rust binary is a hard, actionable error (exit 1)."""
+    monkeypatch.setenv("HEADROOM_PROXY_BACKEND_BIN", str(tmp_path / "missing-headroom-proxy"))
     runner = CliRunner()
     result = runner.invoke(proxy, ["--port", "8787", "--no-optimize"])
-    assert result.exit_code == 2, result.output
+    assert result.exit_code == 1, result.output
+    assert "cargo build --release -p headroom-proxy" in result.output

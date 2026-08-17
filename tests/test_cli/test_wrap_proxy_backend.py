@@ -1,12 +1,13 @@
-"""Tests for the `wrap` spawn path forwarding `HEADROOM_PROXY_BACKEND`.
+"""Tests for the `wrap` spawn path (Phase 3 Task 3.1, always-Rust).
 
-Phase 2 Task 2.2: `headroom wrap` starts the proxy by spawning
-``python -m headroom.cli proxy`` — the same command as always — and the
-`HEADROOM_PROXY_BACKEND` switch inside the child CLI (Task 2.1) picks the
-backend. This file verifies that:
+`headroom wrap` starts the proxy by spawning ``python -m headroom.cli
+proxy`` — the same command as always — which after PR-3.1 always spawns
+the Rust `headroom-proxy` binary (the Python FastAPI server is retired).
+This file verifies that:
 
-(a) the env var (and `HEADROOM_PROXY_BACKEND_BIN`) reach the child process,
-(b) the spawn command is unchanged — the switch happens inside the child,
+(a) the child environment is forwarded intact (incl. the
+    `HEADROOM_PROXY_BACKEND_BIN` binary-path override),
+(b) the spawn command is unchanged — the Rust flip happens inside the CLI,
 (c) readiness polling (`_check_proxy`) is a plain TCP connect that works
     against any backend that binds the port, including the Rust binary, and
 (d) config polling (`_query_proxy_config`) tolerates a config-less health
@@ -54,37 +55,23 @@ def _capture_start_proxy_popen(monkeypatch, tmp_path):
     return captured
 
 
-def test_wrap_forwards_backend_env_to_child(monkeypatch, tmp_path):
-    """HEADROOM_PROXY_BACKEND=rust must reach the spawned proxy child."""
-    monkeypatch.setenv("HEADROOM_PROXY_BACKEND", "rust")
-    captured = _capture_start_proxy_popen(monkeypatch, tmp_path)
-
-    wrap_mod._start_proxy(8787, agent_type="codex")
-
-    env = captured["kwargs"]["env"]
-    assert env["HEADROOM_PROXY_BACKEND"] == "rust"
-
-
-def test_wrap_forwards_backend_bin_env_to_child(monkeypatch, tmp_path):
+def test_wrap_forwards_bin_env_to_child(monkeypatch, tmp_path):
     """HEADROOM_PROXY_BACKEND_BIN (custom binary path) must pass through."""
-    monkeypatch.setenv("HEADROOM_PROXY_BACKEND", "rust")
     monkeypatch.setenv("HEADROOM_PROXY_BACKEND_BIN", "/opt/headroom/headroom-proxy")
     captured = _capture_start_proxy_popen(monkeypatch, tmp_path)
 
     wrap_mod._start_proxy(8787, agent_type="codex")
 
     env = captured["kwargs"]["env"]
-    assert env["HEADROOM_PROXY_BACKEND"] == "rust"
     assert env["HEADROOM_PROXY_BACKEND_BIN"] == "/opt/headroom/headroom-proxy"
 
 
 def test_wrap_spawn_command_unchanged(monkeypatch, tmp_path):
-    """wrap still spawns `python -m headroom.cli proxy`; the switch is internal.
+    """wrap still spawns `python -m headroom.cli proxy`; the Rust flip is internal.
 
-    Task 2.1 handles the branch inside the proxy CLI, so the wrap spawn
-    command must NOT change: no direct binary spawn, no --backend flag.
+    PR-3.1 makes the proxy CLI always spawn the Rust binary, so the wrap
+    spawn command must NOT change: no direct binary spawn, no --backend flag.
     """
-    monkeypatch.setenv("HEADROOM_PROXY_BACKEND", "rust")
     captured = _capture_start_proxy_popen(monkeypatch, tmp_path)
 
     wrap_mod._start_proxy(8787, agent_type="codex")

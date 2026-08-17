@@ -3375,3 +3375,162 @@ def inject_tool_search_deferral_openai(
     if deferred == 0:
         return tools  # nothing to defer → don't perturb the request / cache prefix
     return out
+
+def anthropic_response_to_sse(response: dict[str, Any]) -> list[bytes]:
+    """Convert an Anthropic response dict back to SSE event bytes.
+
+    Relocated from the retired Python proxy (``handlers/streaming.py``) so the
+    surviving CCR response handler keeps its buffered-stream re-serialization
+    path. ``content`` is reconstruction-controlled, so a present-but-null
+    value or a non-list is guarded the same way the proxy guarded it.
+    """
+        events: list[bytes] = []
+
+    # message_start
+    msg_start = {
+        "type": "message_start",
+        "message": {
+            "id": response.get("id", "msg_generated"),
+            "type": "message",
+            "role": response.get("role", "assistant"),
+            "model": response.get("model", "unknown"),
+            "content": [],
+            "stop_reason": None,
+            "usage": response.get("usage", {}),
+        },
+    }
+    events.append(f"event: message_start\ndata: {json.dumps(msg_start)}\n\n".encode())
+
+    # Content blocks. `content` is provider/reconstruction-controlled, so a
+    # present-but-null value or a non-list would crash `enumerate`, and a
+    # non-dict element would crash `block.get(...)`. Guard both, matching the
+    # sibling `_record_ccr_feedback_from_response` below. This is reached from
+    # a call site (anthropic.py buffered CCR path) that only catches
+    # ValueError, so an unguarded TypeError/AttributeError would 500 the
+    # streamed request.
+    content = response.get("content")
+    for idx, block in enumerate(content if isinstance(content, list) else []):
+        if not isinstance(block, dict):
+            continue
+        # content_block_start
+        if block.get("type") == "text":
+            block_start = {
+                "type": "content_block_start",
+                "index": idx,
+                "content_block": {"type": "text", "text": ""},
+            }
+        elif block.get("type") == "tool_use":
+            block_start = {
+                "type": "content_block_start",
+                "index": idx,
+                "content_block": {
+                    "type": "tool_use",
+                    "id": block.get("id", f"toolu_{idx}"),
+                    "name": block.get("name", ""),
+                    "input": {},
+                },
+            }
+        elif block.get("type") == "thinking":
+            content_block = {
+                "type": "thinking",
+                "thinking": "",
+            }
+            if "signature" in block:
+                content_block["signature"] = block["signature"]
+            block_start = {
+                "type": "content_block_start",
+                "index": idx,
+                "content_block": content_block,
+            }
+        elif block.get("type") == "redacted_thinking":
+            block_start = {
+                "type": "content_block_start",
+                "index": idx,
+                "content_block": {
+                    "type": "redacted_thinking",
+                    "data": block.get("data", ""),
+                },
+            }
+        elif block.get("type") == "server_tool_use":
+            block_start = {
+                "type": "content_block_start",
+                "index": idx,
+                "content_block": block,
+            }
+        else:
+            block_start = {
+                "type": "content_block_start",
+                "index": idx,
+                "content_block": block,
+            }
+
+        events.append(
+            f"event: content_block_start\ndata: {json.dumps(block_start)}\n\n".encode()
+        )
+
+        # content_block_delta(s)
+        if block.get("type") == "text" and block.get("text"):
+            delta = {
+                "type": "content_block_delta",
+                "index": idx,
+                "delta": {"type": "text_delta", "text": block["text"]},
+            }
+            events.append(f"event: content_block_delta\ndata: {json.dumps(delta)}\n\n".encode())
+            for citation in block.get("citations", []) or []:
+                citation_delta = {
+                    "type": "content_block_delta",
+                    "index": idx,
+                    "delta": {"type": "citations_delta", "citation": citation},
+                }
+                events.append(
+                    f"event: content_block_delta\ndata: {json.dumps(citation_delta)}\n\n".encode()
+                )
+        elif block.get("type") == "tool_use" and block.get("input"):
+            delta = {
+                "type": "content_block_delta",
+                "index": idx,
+                "delta": {
+                    "type": "input_json_delta",
+                    "partial_json": json.dumps(block["input"]),
+                },
+            }
+            events.append(f"event: content_block_delta\ndata: {json.dumps(delta)}\n\n".encode())
+        elif block.get("type") == "thinking":
+            if block.get("thinking"):
+                delta = {
+                    "type": "content_block_delta",
+                    "index": idx,
+                    "delta": {"type": "thinking_delta", "thinking": block["thinking"]},
+                }
+                events.append(
+                    f"event: content_block_delta\ndata: {json.dumps(delta)}\n\n".encode()
+                )
+            if block.get("signature"):
+                delta = {
+                    "type": "content_block_delta",
+                    "index": idx,
+                    "delta": {"type": "signature_delta", "signature": block["signature"]},
+                }
+                events.append(
+                    f"event: content_block_delta\ndata: {json.dumps(delta)}\n\n".encode()
+                )
+
+        # content_block_stop
+        block_stop = {"type": "content_block_stop", "index": idx}
+        events.append(f"event: content_block_stop\ndata: {json.dumps(block_stop)}\n\n".encode())
+
+    # message_delta
+    msg_delta_payload: dict[str, Any] = {}
+    if "stop_reason" in response:
+        msg_delta_payload["stop_reason"] = response["stop_reason"]
+    if "stop_details" in response:
+        msg_delta_payload["stop_details"] = response["stop_details"]
+    usage = response.get("usage")
+    if not isinstance(usage, dict):
+        usage = {}
+    msg_delta = {
+        "type": "message_delta",
+        "delta": msg_delta_payload,
+        "usage": {"output_tokens": usage.get("output_tokens", 0)},
+    }
+    events.append(f"event: message_delta\ndata: {json.dumps(msg_delta)}\n\n".encode())
