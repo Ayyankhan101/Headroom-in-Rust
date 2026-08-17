@@ -21,6 +21,100 @@ from headroom.proxy.modes import PROXY_MODE_CACHE, normalize_proxy_mode
 from .main import main
 
 
+# ─── Rust backend switch (Phase 2 Task 2.1) ────────────────────────────────
+#
+# `HEADROOM_PROXY_BACKEND` selects which implementation serves the request
+# path. `python` (the default during the canary period) boots the Python
+# FastAPI server exactly as before; `rust` spawns the `headroom-proxy`
+# binary with this CLI's resolved flags mapped onto its env surface, and
+# does NOT import `headroom.proxy.server` at all (so the Python request
+# path can be retired independently in Phase 3).
+
+_RUST_BACKEND_ENV = "HEADROOM_PROXY_BACKEND"
+_RUST_BACKEND_BIN_ENV = "HEADROOM_PROXY_BACKEND_BIN"
+
+
+def _rust_proxy_binary_path() -> str:
+    """Resolve the Rust proxy binary, honoring `HEADROOM_PROXY_BACKEND_BIN`."""
+    explicit = os.environ.get(_RUST_BACKEND_BIN_ENV)
+    if explicit:
+        return explicit
+    # Default: the workspace release build. Resolve from this file's repo
+    # root (headroom/cli/proxy.py -> repo root) so it works from any cwd.
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(repo_root, "target", "release", "headroom-proxy")
+
+
+def _rust_proxy_env_mapping(*, host: str, port: int, no_optimize: bool) -> dict[str, str]:
+    """Map this CLI's resolved settings onto the Rust proxy's env surface.
+
+    The Rust binary (`crates/headroom-proxy/src/config.rs`) reads
+    `HEADROOM_PROXY_LISTEN` (host:port), `HEADROOM_PROXY_COMPRESSION`
+    (0/1), plus the `HEADROOM_PROXY_*` / `HEADROOM_ROLLOUT_*` surface it
+    shares with the Python CLI. We start from a copy of the current
+    environment (so operator-set `HEADROOM_PROXY_UPSTREAM`, region,
+    rollout, etc. pass through unchanged) and override the two knobs this
+    command actually resolves: the listen address and the compression
+    master switch. Flags with no Rust equivalent are intentionally NOT
+    mapped — they keep their Python-only meaning and are simply unused by
+    the Rust binary.
+    """
+    out = dict(os.environ)
+    out["HEADROOM_PROXY_LISTEN"] = f"{host}:{port}"
+    out["HEADROOM_PROXY_COMPRESSION"] = "1" if not no_optimize else "0"
+    return out
+
+
+def _wait_for_healthz(port: int, proc: "Any", timeout: float = 30.0) -> None:
+    """Wait until the Rust proxy accepts connections or the process dies.
+
+    Mirrors `wrap.py`'s readiness poll: the Rust proxy binds its listen
+    socket before serving, so a successful TCP connect means it is ready.
+    If the child exits first, report the failure loudly instead of polling
+    forever.
+    """
+    import socket
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            raise SystemExit(f"Rust proxy exited during startup (code {proc.returncode})")
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=1.0):
+                return
+        except OSError:
+            time.sleep(0.5)
+    raise SystemExit(f"Rust proxy did not become ready on port {port} within {timeout:.0f}s")
+
+
+def _spawn_rust_proxy(cmd: list[str], *, env: dict[str, str], host: str, port: int) -> None:
+    """Spawn the Rust `headroom-proxy` binary and block until it exits.
+
+    The Python CLI maps its resolved flags onto `env` and execs the binary;
+    the child replaces this process for the lifetime of the proxy, so the
+    Python request path is never imported. `cmd[0]` is the binary path.
+    """
+    import subprocess
+
+    binary = cmd[0]
+    if not os.path.exists(binary):
+        click.secho(
+            f"error: Rust proxy binary not found at {binary}. "
+            "Run `cargo build --release -p headroom-proxy`.",
+            fg="red",
+            err=True,
+        )
+        raise SystemExit(1)
+    proc = subprocess.Popen(cmd, env=env)
+    try:
+        _wait_for_healthz(port, proc)
+    except SystemExit as exc:
+        proc.terminate()
+        raise
+    proc.wait()
+
+
 def ensure_proxy_dependencies() -> None:
     """Verify optional proxy extras are installed before starting or wrapping."""
     required_modules: list[str] = [
@@ -1116,6 +1210,25 @@ def proxy(
         OPENAI_BASE_URL=http://localhost:8787/v1 your-app
     """
     _reexec_with_malloc_tuning()
+
+    proxy_backend = os.environ.get(_RUST_BACKEND_ENV, "python").lower()
+    if proxy_backend not in ("python", "rust"):
+        click.secho(
+            f"error: HEADROOM_PROXY_BACKEND={proxy_backend!r} must be 'python' or 'rust'",
+            fg="red",
+            err=True,
+        )
+        raise SystemExit(2)
+
+    if proxy_backend == "rust":
+        _spawn_rust_proxy(
+            cmd=[_rust_proxy_binary_path()],
+            env=_rust_proxy_env_mapping(host=host, port=port, no_optimize=no_optimize),
+            host=host,
+            port=port,
+        )
+        return
+
     ensure_proxy_dependencies()
 
     # Import here to avoid slow startup
