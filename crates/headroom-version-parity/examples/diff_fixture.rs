@@ -3,7 +3,7 @@
 //! Usage: cargo run -p headroom-version-parity --example diff_fixture -- <path-to-fixture.json>
 
 use anyhow::{bail, Context, Result};
-use headroom_parity::{builtin_comparators, Fixture};
+use headroom_version_parity::{builtin_comparators, Fixture};
 use std::env;
 use std::fs;
 
