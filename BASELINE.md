@@ -377,6 +377,15 @@ PR-3.3 finished the retirement in 5 code commits + this docs commit:
 - ✅ **Amended gate (vs plan text):** the plan's PR-3.3 "clean sweep — `git grep -i uvicorn|fastapi|litellm headroom/` nothing in non-test code" cannot hold on the measured tree: uvicorn/fastapi remain as comments / `TYPE_CHECKING` imports in surviving off-path modules (`proxy/models.py`, `proxy/request_scope.py`, `proxy/helpers.py`, `memory/traffic_learner.py`, `cli/wrap.py`) and litellm remains in the §6c off-path integrations. `pyproject.toml` unchanged: PR-3.1 already moved fastapi/uvicorn out of runtime deps; the `[proxy]` extra's remaining deps serve surviving MCP/integrations/evals code and the gated litellm dep (§6c) stays. The honest gate is: **no uvicorn/fastapi/litellm in the request path or proxy-backend routing** — grep hits limited to comments/TYPE_CHECKING and §6c integrations.
 - ✅ **Gates:** `cargo test --workspace` → 1,519 passed / 0 failed (with `ORT_DYLIB_PATH`); `make test-parity` → 238/238 matched, 0 skipped, 0 diffed via the renamed crate; `make ci-precheck` → fmt ✅, clippy ✅, rust tests ✅, python tests ✅, commitlint ⏳ (only the pre-existing upstream-sync header/footer violations documented in §5; all 6 PR-3.3 commits pass individually).
 
+## 6e. Phase 4 exit gate — status (Tasks 4.1–4.2, verified 2026-08-18)
+
+Phase 4 cut ops over to the Rust binary and refreshed docs:
+
+- ✅ **Task 4.1 — Pure Rust distroless Docker image (1 commit):** `Dockerfile` gains a `runtime-proxy` target based on `gcr.io/distroless/static-debian12:nonroot` (~50 MB vs ~500 MB Python). Copies only the `headroom-proxy` binary; no Python, no shell, no curl. `docker-compose.yml` updated to build from `runtime-proxy` target, replaced Python CLI flags (`--host`, `HEADROOM_HOST`) with Rust env surface (`HEADROOM_PROXY_UPSTREAM`, `HEADROOM_PROXY_LISTEN`), removed curl-based healthcheck (distroless has no shell — orchestrators probe `/healthz` directly).
+- ✅ **Task 4.2 — Architecture docs (1 commit):** `docs/content/docs/architecture.mdx` updated: diagram and description now reference the Rust binary (`headroom-proxy`) instead of FastAPI.
+- ✅ **Migration guide** already existed at `docs/operations/python-to-rust-migration.md` (created in earlier docs commits); documents the two-image strategy (Python CLI vs distroless proxy), env-var config surface, and 30-day rollback.
+- ✅ **Gates:** `cargo fmt --all --check` ✅; `cargo clippy --workspace -- -D warnings` ✅; `cargo test --workspace --exclude headroom-py` → 943 passed / 0 failed (2 kompress_parity tests skipped — known `ORT_DYLIB_PATH` requirement, Finding F1).
+
 ## 7. Notes for later phases
 
 1. **`/dashboard` deferred to PR-3.1** (plan Global Constraints): the Python server serves an operator web UI (`/dashboard`, `/settings`, `headroom/dashboard/templates/`) with no Rust equivalent. The PR must decide: document the retirement or port a minimal Rust dashboard.
