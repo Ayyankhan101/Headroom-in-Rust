@@ -109,8 +109,8 @@ use super::smart_crusher::{SmartCrusher, SmartCrusherConfig};
 use crate::ccr::{compute_key, marker_for, CcrStore};
 use crate::tokenizer::get_tokenizer;
 use crate::transforms::pipeline::block_compressor::BlockCompressor;
-use crate::transforms::pipeline::traits::CompressionContext;
 use crate::transforms::pipeline::config::BlockThresholds;
+use crate::transforms::pipeline::traits::CompressionContext;
 
 // ─── Tunable constants (no magic numbers in the dispatch logic) ────────
 

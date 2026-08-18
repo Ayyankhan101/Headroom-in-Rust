@@ -56,12 +56,12 @@ impl PipelineBlockCompressor {
 
         let pipeline = CompressionPipeline::builder()
             .with_reformat(JsonMinifier)
-            .with_reformat(LogTemplate::new(config.reformat.log_template.clone()))
+            .with_reformat(LogTemplate::new(config.reformat.log_template))
             .with_offload(JsonOffload::from_pipeline(config))
-            .with_offload(LogOffload::new(config.bloat.log.clone()))
-            .with_offload(DiffOffload::new(config.bloat.diff.clone()))
+            .with_offload(LogOffload::new(config.bloat.log))
+            .with_offload(DiffOffload::new(config.bloat.diff))
             .with_offload(DiffNoise::new(config.offload.diff_noise.clone()))
-            .with_offload(ProseFieldOffload::new(config.offload.prose_field.clone()))
+            .with_offload(ProseFieldOffload::new(config.offload.prose_field))
             .with_config(config.clone())
             .build();
 

@@ -84,7 +84,7 @@ pub mod reformats;
 pub mod traits;
 
 pub use config::{
-    BlockThresholds, BloatConfigs, ConfigError, DiffBloatConfig, DiffNoiseConfig,
+    BloatConfigs, BlockThresholds, ConfigError, DiffBloatConfig, DiffNoiseConfig,
     JsonOffloadConfig, LogBloatConfig, LogTemplateConfig, OffloadConfigs, OrchestratorConfig,
     PipelineConfig, ProseFieldConfig, ReformatConfigs, SearchBloatConfig,
 };
@@ -92,10 +92,10 @@ pub use config::{
 // (deprecated from default pipeline; reach via the explicit module
 // path if you want to opt in). See `offloads::search_offload` head
 // docs for rationale.
+pub use block_compressor::{BlockCompressResult, BlockCompressor, PipelineBlockCompressor};
 pub use offloads::{DiffNoise, DiffOffload, JsonOffload, LogOffload, ProseFieldOffload};
 pub use orchestrator::{CompressionPipeline, CompressionPipelineBuilder, PipelineResult};
 pub use reformats::{JsonMinifier, LogTemplate};
-pub use block_compressor::{BlockCompressor, BlockCompressResult, PipelineBlockCompressor};
 pub use traits::{
     CompressionContext, OffloadOutput, OffloadTransform, ReformatOutput, ReformatTransform,
     TransformError,

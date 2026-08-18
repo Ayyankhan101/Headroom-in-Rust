@@ -1,5 +1,7 @@
 use headroom_core::ccr::InMemoryCcrStore;
-use headroom_core::transforms::pipeline::block_compressor::{BlockCompressor, PipelineBlockCompressor};
+use headroom_core::transforms::pipeline::block_compressor::{
+    BlockCompressor, PipelineBlockCompressor,
+};
 use headroom_core::transforms::pipeline::config::PipelineConfig;
 use headroom_core::transforms::pipeline::traits::CompressionContext;
 use headroom_core::transforms::ContentType;
@@ -14,8 +16,14 @@ fn pipeline_block_compressor_compresses_json_array() {
     // A pretty-printed JSON object — JsonMinifier should strip whitespace.
     let input = "{\n  \"a\": 1,\n  \"b\": 2\n}";
     let result = compressor.compress(input, ContentType::JsonArray, &ctx, Some(&store));
-    assert!(result.bytes_saved > 0, "expected bytes saved on pretty JSON");
-    assert!(!result.steps_applied.is_empty(), "expected at least one step");
+    assert!(
+        result.bytes_saved > 0,
+        "expected bytes saved on pretty JSON"
+    );
+    assert!(
+        !result.steps_applied.is_empty(),
+        "expected at least one step"
+    );
 }
 
 #[test]
