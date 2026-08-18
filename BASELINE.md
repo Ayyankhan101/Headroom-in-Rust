@@ -290,7 +290,7 @@ Also verified: `headroom/backends/base.py` is imported by surviving `headroom/ca
 
 ## 4. Parity baseline (measured `make test-parity`)
 
-Command: `make test-parity` (= `cargo run -p headroom-parity -- run --fixtures tests/parity/fixtures`).
+Command: `make test-parity` (= `cargo run -p headroom-version-parity -- run --fixtures tests/parity/fixtures`).
 **Requires `ORT_DYLIB_PATH` on this machine — see Finding F1.**
 
 | Comparator | total | matched | skipped | diffed |
@@ -316,7 +316,7 @@ Command: `make test-parity` (= `cargo run -p headroom-parity -- run --fixtures t
 - **Fix (used for all gate runs below):** `pip install onnxruntime` into the venv, then
   `export ORT_DYLIB_PATH=$PWD/.venv/lib/python3.13/site-packages/onnxruntime/capi/libonnxruntime.1.28.0.dylib`.
 - **Confirmed in Task 1.5:** the "slow kompress tail" is this deadlock, not slow inference — without `ORT_DYLIB_PATH` set, `parity-run` and `cargo test --workspace` both stall on kompress indefinitely. With it set, kompress completes (21/21 matched in parity; `kompress_matches_python_fixtures_byte_for_byte` passes in 6.56s under cargo test).
-- **Resolved (2026-08-17):** `Kompress::from_files`'s session builder now runs the same ort dylib guard magika uses (`magika_detector::dynamic_ort_loader_ready`) before any ort API is touched, so a missing dylib surfaces as a loud `Err` ("ONNX Runtime unavailable: ... set ORT_DYLIB_PATH") instead of a 0%-CPU hang. `KompressComparator` propagates that error as the Skipped reason. Regression tests: `crates/headroom-core/tests/kompress_ort_fail_loud.rs` and `kompress_comparator_fails_loud_when_dylib_missing` in `crates/headroom-parity`. Any dev machine with the model cached still needs the env var (documented in `docs/operations/python-to-rust-migration.md`), but the failure mode is now a clear error, not a hang.
+- **Resolved (2026-08-17):** `Kompress::from_files`'s session builder now runs the same ort dylib guard magika uses (`magika_detector::dynamic_ort_loader_ready`) before any ort API is touched, so a missing dylib surfaces as a loud `Err` ("ONNX Runtime unavailable: ... set ORT_DYLIB_PATH") instead of a 0%-CPU hang. `KompressComparator` propagates that error as the Skipped reason. Regression tests: `crates/headroom-core/tests/kompress_ort_fail_loud.rs` and `kompress_comparator_fails_loud_when_dylib_missing` in `crates/headroom-version-parity`. Any dev machine with the model cached still needs the env var (documented in `docs/operations/python-to-rust-migration.md`), but the failure mode is now a clear error, not a hang.
 
 ---
 
@@ -353,7 +353,7 @@ Python env used: `.venv` (Python 3.13.13) + `pip install -e .` (maturin-built `h
 - ✅ `cargo test --workspace` green — 1,512 passed / 0 failed (with `ORT_DYLIB_PATH`; kompress parity test passes in 6.56s)
 - ✅ Python subset green — 43 passed (test_ccr.py + smart_crusher_rust_parity + acceptance)
 - ✅ `make ci-precheck` components: fmt ✅ (after rustfmt fix for Task 1.3/1.4 code), clippy ✅, rust tests ✅, python tests ✅, commitlint fails only on upstream-sync commits (see §5)
-- ⚠️ **Gap found & fixed in Task 1.5:** Tasks 1.3/1.4 shipped un-rustfmt'd code (`ccr/tool_injection.rs`, `cache_aligner.rs`, `headroom-parity/src/lib.rs` tests) — `cargo fmt --all` applied; the fix rides in the Task 1.5 commit.
+- ⚠️ **Gap found & fixed in Task 1.5:** Tasks 1.3/1.4 shipped un-rustfmt'd code (`ccr/tool_injection.rs`, `cache_aligner.rs`, `headroom-version-parity/src/lib.rs` tests) — `cargo fmt --all` applied; the fix rides in the Task 1.5 commit.
 
 ## 6c. Phase 3 PR-3.2 exit gate — status (Task 3.2, verified 2026-08-18)
 
@@ -367,10 +367,20 @@ PR-3.2 retired the LiteLLM **proxy backend** in 4 code commits (backends, provid
 - ✅ Gates: `pytest` on `test_provider_registry*.py` + `test_ccr.py` + `test_litellm_optional.py` → 39 passed; surviving litellm-dependent off-path tests (pricing, vertex provider, savings-tracker) → 26 passed; `cargo test --workspace` → 1,519 passed / 0 failed (with `ORT_DYLIB_PATH`, see F1); `make test-parity` → 238/238 matched, 0 skipped, 0 diffed
 - ⚠️ **Amended gate (vs plan text):** the plan's literal exit gate — "no `litellm` in runtime deps or non-test code" — cannot hold on the measured tree: litellm is a **gated core dep** (`python_version < 3.14`, GH #956) consumed by surviving off-path code (`providers/litellm.py` + `providers/__init__.py` re-export, `integrations/litellm_callback.py` + langchain, `pricing/`, `models/registry.py`, `perf/analyzer.py`, `proxy/savings_tracker.py`). **Amended gate:** no litellm in the request path or proxy-backend routing — `git grep -i litellm headroom/` hits are limited to the surviving off-path integrations above. `pyproject.toml` unchanged for PR-3.2 (dropping the dep would break pricing/providers today; a future off-path retirement can revisit it).
 
+## 6d. Phase 3 PR-3.3 exit gate — status (Task 3.3, verified 2026-08-18)
+
+PR-3.3 finished the retirement in 5 code commits + this docs commit:
+
+- ✅ **Q12 — crate rename + contract reframe (2 commits):** `crates/headroom-parity/` → `crates/headroom-version-parity/` (`git mv`; package name, workspace `members`/`default-members`, `Makefile test-parity`, `.github/workflows/rust.yml` comment, `crates/headroom-core` comments, `tests/parity/record_smart_crusher.py` + `tests/test_transforms/test_*_rust_parity.py` docstrings, `examples/diff_fixture.rs`). Comparator contract reframed to version parity: `ComparisonOutcome::Diff { previous, current }` (was `expected/actual`), module doc now frames fixtures as frozen *previous-version* outputs guarding future Rust compressor variants (e.g. a Kompress port); `parity-run` bin about-text and diff labels updated. Lockfile regenerated.
+- ✅ **Orphan cleanup (1 commit):** deleted the retired shadow harness `e2e/shadow/` (`runner.py`, `corpus.py`, `test_byte_equality.py`), its sole fixture corpus `tests/parity/fixtures/codex_openai_contracts/`, and the stale `docs/operations/shadow-deploy.md`. Zero remaining references (CI retired the shadow gate in PR-3.1; Python request path is gone so Python-vs-Rust shadowing is impossible).
+- ✅ **Docs sweep (1 commit):** `RUST_DEV.md` → `DEV.md` (`git mv` + internal `headroom-parity` refs); code docstring refs in `headroom/transforms/observability.py` + `smart_crusher.py`; `wiki/proxy.md` + `docs/content/docs/proxy.mdx` gunicorn/uvicorn production sections replaced with the Rust binary; `docs/content/docs/litellm.mdx` callout updated (proxy `--backend` LiteLLM routing retired, callback integration survives); CHANGELOG **Breaking** entry added under Unreleased.
+- ✅ **Amended gate (vs plan text):** the plan's PR-3.3 "clean sweep — `git grep -i uvicorn|fastapi|litellm headroom/` nothing in non-test code" cannot hold on the measured tree: uvicorn/fastapi remain as comments / `TYPE_CHECKING` imports in surviving off-path modules (`proxy/models.py`, `proxy/request_scope.py`, `proxy/helpers.py`, `memory/traffic_learner.py`, `cli/wrap.py`) and litellm remains in the §6c off-path integrations. `pyproject.toml` unchanged: PR-3.1 already moved fastapi/uvicorn out of runtime deps; the `[proxy]` extra's remaining deps serve surviving MCP/integrations/evals code and the gated litellm dep (§6c) stays. The honest gate is: **no uvicorn/fastapi/litellm in the request path or proxy-backend routing** — grep hits limited to comments/TYPE_CHECKING and §6c integrations.
+- ✅ **Gates:** `cargo test --workspace` → 1,519 passed / 0 failed (with `ORT_DYLIB_PATH`); `make test-parity` → 238/238 matched, 0 skipped, 0 diffed via the renamed crate; `make ci-precheck` → fmt ✅, clippy ✅, rust tests ✅, python tests ✅, commitlint ⏳ (only the pre-existing upstream-sync header/footer violations documented in §5; all 6 PR-3.3 commits pass individually).
+
 ## 7. Notes for later phases
 
 1. **`/dashboard` deferred to PR-3.1** (plan Global Constraints): the Python server serves an operator web UI (`/dashboard`, `/settings`, `headroom/dashboard/templates/`) with no Rust equivalent. The PR must decide: document the retirement or port a minimal Rust dashboard.
 2. **`ORT_DYLIB_PATH` is required on dev machines with the kompress model cached** (Finding F1). Add to Phase 2/3 docs and dev setup; fix the deadlock in a follow-up PR.
 3. **Shared transform shims** (`content_router.py`, `smart_crusher.py`, `log_compressor.py`, `diff_compressor.py`) are used by surviving `evals/` + `integrations/` code — PR-3.1 must keep them or update those consumers (§3).
 4. **Phase 3 gate command** `git grep -i "uvicorn\|fastapi\|litellm" headroom/` — after PR-3.1/3.2 the remaining hits are comments / TYPE_CHECKING imports in surviving off-path modules (`memory/traffic_learner.py`, `proxy/models.py`, `proxy/request_scope.py`, `proxy/helpers.py`, `cli/wrap.py`) and the off-path litellm integrations listed in §6c. A full litellm sweep is **not** in PR-3.3's scope — it would retire pricing/provider/integration surface that survives.
-5. **Rust-side parity baseline for later phases:** the `tests/parity/fixtures/` tree is the frozen Python output; Phase 3.3 (Q12, greenlit) repurposes `crates/headroom-parity/` → version-parity against these fixtures.
+5. **Rust-side parity baseline for later phases:** **done in PR-3.3 (Q12)** — `crates/headroom-parity/` repurposed to `crates/headroom-version-parity/` (version-parity against the frozen fixture outputs; see §6d).
