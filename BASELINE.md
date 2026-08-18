@@ -176,7 +176,7 @@ headroom/proxy/ws_session_registry.py
 
 | File | LOC | Phase |
 |---|---:|---|
-| `headroom/backends/litellm.py` | 1,597 | PR-3.2 (keep `base.py` / `anyllm.py` / `__init__.py` — see §3) |
+| `headroom/backends/litellm.py` | 1,597 | **Deleted PR-3.2** (kept `base.py` / `anyllm.py` / `__init__.py` — see §3) |
 | `headroom/transforms/cache_aligner.py` | 413 | PR-3.1 (Rust port lands in Phase 1 Task 1.4) |
 | `headroom/transforms/*.py` shims | see §3 | PR-3.1 (request-path subset only) |
 
@@ -355,10 +355,22 @@ Python env used: `.venv` (Python 3.13.13) + `pip install -e .` (maturin-built `h
 - ✅ `make ci-precheck` components: fmt ✅ (after rustfmt fix for Task 1.3/1.4 code), clippy ✅, rust tests ✅, python tests ✅, commitlint fails only on upstream-sync commits (see §5)
 - ⚠️ **Gap found & fixed in Task 1.5:** Tasks 1.3/1.4 shipped un-rustfmt'd code (`ccr/tool_injection.rs`, `cache_aligner.rs`, `headroom-parity/src/lib.rs` tests) — `cargo fmt --all` applied; the fix rides in the Task 1.5 commit.
 
+## 6c. Phase 3 PR-3.2 exit gate — status (Task 3.2, verified 2026-08-18)
+
+PR-3.2 retired the LiteLLM **proxy backend** in 4 code commits (backends, providers, cli, tests) + this docs commit:
+
+- ✅ `headroom/backends/litellm.py` deleted (1,597 LOC); `backends/__init__.py` now exports only `base`/`anyllm`
+- ✅ `headroom/providers/registry.py` — removed `litellm_backend_cls` param, the litellm branch of `create_proxy_backend` (now warns + returns `None`), `_load_litellm_backend`, and the litellm path of `format_backend_status`
+- ✅ CLI surface swept — `--backend` help texts in `headroom/cli/proxy.py` + `headroom/cli/wrap.py` no longer advertise `litellm-*` (10 strings, incl. the aider example)
+- ✅ Backend-only tests deleted (8 files: `test_litellm_{caller_key,nonstream_cache_usage,openai_passthrough,upstream_timeout}.py`, `test_bedrock_{region,tool_result_cache_and_streaming_stats}.py`, `test_backends/test_{bedrock_botocore_preflight,litellm_cache_stats}.py`); registry tests trimmed to anyllm-only in `test_provider_registry*.py` (structured-failure coverage of `_log_backend_init_failure` preserved via the anyllm branch)
+- ✅ Deleted module unreferenced: `git grep -E "backends\.litellm|LiteLLMBackend|litellm_backend_cls" headroom/ tests/` → nothing
+- ✅ Gates: `pytest` on `test_provider_registry*.py` + `test_ccr.py` + `test_litellm_optional.py` → 39 passed; surviving litellm-dependent off-path tests (pricing, vertex provider, savings-tracker) → 26 passed; `cargo test --workspace` → 1,519 passed / 0 failed (with `ORT_DYLIB_PATH`, see F1); `make test-parity` → 238/238 matched, 0 skipped, 0 diffed
+- ⚠️ **Amended gate (vs plan text):** the plan's literal exit gate — "no `litellm` in runtime deps or non-test code" — cannot hold on the measured tree: litellm is a **gated core dep** (`python_version < 3.14`, GH #956) consumed by surviving off-path code (`providers/litellm.py` + `providers/__init__.py` re-export, `integrations/litellm_callback.py` + langchain, `pricing/`, `models/registry.py`, `perf/analyzer.py`, `proxy/savings_tracker.py`). **Amended gate:** no litellm in the request path or proxy-backend routing — `git grep -i litellm headroom/` hits are limited to the surviving off-path integrations above. `pyproject.toml` unchanged for PR-3.2 (dropping the dep would break pricing/providers today; a future off-path retirement can revisit it).
+
 ## 7. Notes for later phases
 
 1. **`/dashboard` deferred to PR-3.1** (plan Global Constraints): the Python server serves an operator web UI (`/dashboard`, `/settings`, `headroom/dashboard/templates/`) with no Rust equivalent. The PR must decide: document the retirement or port a minimal Rust dashboard.
 2. **`ORT_DYLIB_PATH` is required on dev machines with the kompress model cached** (Finding F1). Add to Phase 2/3 docs and dev setup; fix the deadlock in a follow-up PR.
 3. **Shared transform shims** (`content_router.py`, `smart_crusher.py`, `log_compressor.py`, `diff_compressor.py`) are used by surviving `evals/` + `integrations/` code — PR-3.1 must keep them or update those consumers (§3).
-4. **Phase 3 gate command** `git grep -i "uvicorn\|fastapi\|litellm" headroom/` — expect hits in `headroom/proxy/` + `headroom/backends/` only; clean sweep in PR-3.3.
+4. **Phase 3 gate command** `git grep -i "uvicorn\|fastapi\|litellm" headroom/` — after PR-3.1/3.2 the remaining hits are comments / TYPE_CHECKING imports in surviving off-path modules (`memory/traffic_learner.py`, `proxy/models.py`, `proxy/request_scope.py`, `proxy/helpers.py`, `cli/wrap.py`) and the off-path litellm integrations listed in §6c. A full litellm sweep is **not** in PR-3.3's scope — it would retire pricing/provider/integration surface that survives.
 5. **Rust-side parity baseline for later phases:** the `tests/parity/fixtures/` tree is the frozen Python output; Phase 3.3 (Q12, greenlit) repurposes `crates/headroom-parity/` → version-parity against these fixtures.
