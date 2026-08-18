@@ -8,9 +8,9 @@
 
 use headroom_core::ccr::backends::InMemoryCcrStore;
 use headroom_core::ccr::{compute_key, CcrStore};
-use headroom_core::transforms::live_zone::{
-    compress_anthropic_live_zone, compress_anthropic_live_zone_with_ccr, AuthMode, LiveZoneOutcome,
-    DEFAULT_MODEL,
+use headroom_core::transforms::live_zone::{AuthMode, LiveZoneOutcome, DEFAULT_MODEL};
+use headroom_core::transforms::{
+    compress_anthropic_live_zone_with_compressor, BlockThresholds, PipelineBlockCompressor,
 };
 use serde_json::{json, Value};
 
@@ -52,12 +52,16 @@ fn ccr_marker_injected_when_store_wired() {
     let body = body_with_payload(&payload);
     let store = InMemoryCcrStore::new();
 
-    let outcome = compress_anthropic_live_zone_with_ccr(
+    let compressor = PipelineBlockCompressor::default();
+    let thresholds = BlockThresholds::default();
+    let outcome = compress_anthropic_live_zone_with_compressor(
         &body,
         0,
         AuthMode::Payg,
         DEFAULT_MODEL,
         Some(&store),
+        &compressor,
+        &thresholds,
     )
     .expect("dispatcher must succeed");
 
@@ -87,8 +91,18 @@ fn no_marker_when_store_omitted() {
     let payload = large_json_array_payload();
     let body = body_with_payload(&payload);
 
-    let outcome =
-        compress_anthropic_live_zone(&body, 0, AuthMode::Payg, DEFAULT_MODEL).expect("dispatcher");
+    let compressor = PipelineBlockCompressor::default();
+    let thresholds = BlockThresholds::default();
+    let outcome = compress_anthropic_live_zone_with_compressor(
+        &body,
+        0,
+        AuthMode::Payg,
+        DEFAULT_MODEL,
+        None, // no CCR store — must not inject markers
+        &compressor,
+        &thresholds,
+    )
+    .expect("dispatcher");
 
     let new_body = match &outcome {
         LiveZoneOutcome::Modified { new_body, .. } => new_body.get().to_string(),
@@ -107,12 +121,16 @@ fn store_only_populated_after_token_gate_admits() {
     // dispatcher never runs a compressor → store must stay empty.
     let body = body_with_payload("tiny");
     let store = InMemoryCcrStore::new();
-    let _ = compress_anthropic_live_zone_with_ccr(
+    let compressor = PipelineBlockCompressor::default();
+    let thresholds = BlockThresholds::default();
+    let _ = compress_anthropic_live_zone_with_compressor(
         &body,
         0,
         AuthMode::Payg,
         DEFAULT_MODEL,
         Some(&store),
+        &compressor,
+        &thresholds,
     )
     .expect("dispatcher");
     assert_eq!(store.len(), 0, "no compression → no CCR put");

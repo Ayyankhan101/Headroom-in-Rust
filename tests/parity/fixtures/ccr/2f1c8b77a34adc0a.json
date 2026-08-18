@@ -1,0 +1,19 @@
+{
+  "config": {},
+  "input": [
+    {
+      "name": "headroom_retrieve"
+    }
+  ],
+  "input_sha256": "2f1c8b77a34adc0a2827260c077bf9a27f3117d8d87e5515d4bd93ff3e10b4ec",
+  "output": [
+    [
+      {
+        "name": "headroom_retrieve"
+      }
+    ],
+    false
+  ],
+  "recorded_at": "2026-08-17T08:53:46.168269+00:00",
+  "transform": "ccr"
+}

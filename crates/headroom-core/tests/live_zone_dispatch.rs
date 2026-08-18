@@ -12,9 +12,11 @@
 //! Plus the cache-safety invariant: bytes outside the rewritten
 //! block are byte-identical to the input (SHA-256 prefix + suffix).
 
+use headroom_core::ccr::InMemoryCcrStore;
 use headroom_core::transforms::live_zone::DEFAULT_MODEL;
 use headroom_core::transforms::{
-    compress_anthropic_live_zone, AuthMode, BlockAction, LiveZoneOutcome,
+    compress_anthropic_live_zone_with_compressor, AuthMode, BlockAction, BlockThresholds,
+    LiveZoneOutcome, PipelineBlockCompressor,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -24,8 +26,19 @@ fn body_of(value: Value) -> Vec<u8> {
 }
 
 fn dispatch(body: &[u8]) -> LiveZoneOutcome {
-    compress_anthropic_live_zone(body, 0, AuthMode::Payg, DEFAULT_MODEL)
-        .expect("dispatcher returns Ok on valid bodies")
+    let compressor = PipelineBlockCompressor::default();
+    let thresholds = BlockThresholds::default();
+    let store = InMemoryCcrStore::new();
+    compress_anthropic_live_zone_with_compressor(
+        body,
+        0,
+        AuthMode::Payg,
+        DEFAULT_MODEL,
+        Some(&store),
+        &compressor,
+        &thresholds,
+    )
+    .expect("dispatcher returns Ok on valid bodies")
 }
 
 /// Find the byte range of the FIRST occurrence of `needle` inside

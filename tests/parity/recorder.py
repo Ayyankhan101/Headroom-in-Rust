@@ -753,6 +753,13 @@ def _varied_content_detector_inputs() -> list[str]:
 
 
 def _varied_message_batches() -> list[list[dict[str, Any]]]:
+    """Message batches for the detector-only CacheAligner.
+
+    The first 20 cover the iso8601 path (a date + request id in the system
+    prompt). The extra 5 drive the remaining detector branches the Rust
+    port must match: canonical UUID, ISO-8601 datetime with `T`, hex hash,
+    JWT shape, and a stable control message (no findings).
+    """
     today = _dt.date.today().isoformat()
     out: list[list[dict[str, Any]]] = []
     for i in range(20):
@@ -765,6 +772,54 @@ def _varied_message_batches() -> list[list[dict[str, Any]]]:
                 {"role": "user", "content": f"Question number {i}: what is 2+2?"},
             ]
         )
+    # Detector-only branch coverage: UUID / ISO-8601 datetime / hex hash /
+    # JWT shape / stable control. Each input is unique so fixture digests
+    # never collide with the date-based batches above.
+    out.extend(
+        [
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a helpful assistant. Request id 12. "
+                        "UUID 123e4567-e89b-12d3-a456-426614174000."
+                    ),
+                },
+                {"role": "user", "content": "Control message one."},
+            ],
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "Current date: 2026-08-14T09:30:00Z. "
+                        "Trace 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08."
+                    ),
+                },
+                {"role": "user", "content": "Control message two."},
+            ],
+            [
+                {
+                    "role": "system",
+                    "content": "Session token eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMifQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+                },
+                {"role": "user", "content": "Control message three."},
+            ],
+            [
+                {
+                    "role": "system",
+                    "content": "Build hash 550e8400e29b41d4a716446655440000 is the deployment marker.",
+                },
+                {"role": "user", "content": "Control message four."},
+            ],
+            [
+                {
+                    "role": "system",
+                    "content": "Stable system prompt, no volatile content at all.",
+                },
+                {"role": "user", "content": "Control message five."},
+            ],
+        ]
+    )
     return out
 
 
@@ -816,46 +871,8 @@ def run_default_workload(root: Path | None = None) -> dict[str, int]:
     except Exception as e:
         LOG.warning("tokenizer workload failed: %s", e)
 
-    # cache_aligner — needs Tokenizer; reuse the one above
-    try:
-        from headroom.providers.openai import OpenAITokenCounter
-        from headroom.tokenizer import Tokenizer
-        from headroom.transforms.cache_aligner import CacheAligner
-
-        tok = Tokenizer(OpenAITokenCounter("gpt-4o-mini"), model="gpt-4o-mini")
-        aligner = CacheAligner()
-        for batch in _varied_message_batches():
-            aligner.apply(batch, tok)
-            counts["cache_aligner"] += 1
-    except Exception as e:
-        LOG.warning("cache_aligner workload failed: %s", e)
-
-    # ccr — CCRToolInjector is a dataclass whose `inject_tool_definition`
-    # takes `tools: list[dict] | None` and returns `(tools, was_injected)`.
-    # It only mutates state when it has already scanned messages with
-    # compression markers, so we force `has_compressed_content` by planting
-    # a hash in the detected set directly.
-    try:
-        from headroom.ccr.tool_injection import CCRToolInjector
-
-        for i in range(25):
-            injector = CCRToolInjector(provider="anthropic" if i % 2 == 0 else "openai")
-            # Plant a unique 24-hex-char hash per iteration so the injector
-            # treats each call as having compressed content.
-            planted_hash = hashlib.sha256(f"planted-{i}".encode()).hexdigest()[:24]
-            injector._detected_hashes.append(planted_hash)  # noqa: SLF001
-            # Always include a unique marker tool in the list so input
-            # hashes never collide across iterations.
-            existing_tools: list[dict[str, Any]] | None = [
-                {"name": f"other_tool_{i}", "description": f"desc {i}"}
-            ]
-            try:
-                injector.inject_tool_definition(existing_tools)
-                counts["ccr"] += 1
-            except Exception as e:
-                LOG.debug("ccr inject failed on input %d: %s", i, e)
-    except Exception as e:
-        LOG.warning("ccr workload failed: %s", e)
+    _run_cache_aligner_workload(counts)
+    _run_ccr_workload(counts)
 
     # content_detector — drive a wide mix of content types so every dispatch
     # branch (json_array, diff, html, search, log, code-by-language,
@@ -908,6 +925,90 @@ def run_default_workload(root: Path | None = None) -> dict[str, int]:
         LOG.warning("code_aware_compressor workload failed: %s", e)
 
     return counts
+
+
+def _run_cache_aligner_workload(counts: dict[str, int]) -> None:
+    """Drive the detector-only CacheAligner over 25 message batches.
+
+    One fresh `CacheAligner` per batch: `_previous_prefix_hash` is
+    per-instance state, so sharing a single aligner would bake the call
+    ORDER into `cache_metrics.previous_hash` / `prefix_changed`. A
+    stateless Rust comparator cannot reproduce ordering-dependent output,
+    so every fixture is recorded against a fresh instance
+    (`previous_hash=None`, `prefix_changed=False`).
+    """
+    try:
+        from headroom.providers.openai import OpenAITokenCounter
+        from headroom.tokenizer import Tokenizer
+        from headroom.transforms.cache_aligner import CacheAligner
+
+        tok = Tokenizer(OpenAITokenCounter("gpt-4o-mini"), model="gpt-4o-mini")
+        for batch in _varied_message_batches():
+            aligner = CacheAligner()
+            aligner.apply(batch, tok)
+            counts["cache_aligner"] += 1
+    except Exception as e:
+        LOG.warning("cache_aligner workload failed: %s", e)
+
+
+def _run_ccr_workload(counts: dict[str, int]) -> None:
+    """Drive CCR tool injection over the legacy + sticky-on paths.
+
+    `CCRToolInjector.inject_tool_definition` returns `(tools, was_injected)`.
+    Two recording paths:
+
+    1. has_compressed_content (legacy): plant a hash in the detected set
+       so the injector treats each call as having compressed content.
+    2. sticky-on (PR-B7): pass `session_has_done_ccr=True` so the tool is
+       injected even with no markers at all — the shape the real proxy
+       produces once a session has done CCR.
+
+    Provider is fixed to "anthropic" for every recorded call: the fixture
+    `config` is `{}`, so the Rust comparator cannot know which provider
+    format a fixture expects. It emits the anthropic definition
+    (`create_ccr_tool_definition("anthropic")`), and every fixture must be
+    recorded against that same definition.
+    """
+    try:
+        from headroom.ccr.tool_injection import CCRToolInjector
+
+        for i in range(25):
+            injector = CCRToolInjector(provider="anthropic")
+            # Plant a unique 24-hex-char hash per iteration so the injector
+            # treats each call as having compressed content.
+            planted_hash = hashlib.sha256(f"planted-{i}".encode()).hexdigest()[:24]
+            injector._detected_hashes.append(planted_hash)  # noqa: SLF001
+            # Always include a unique marker tool in the list so input
+            # hashes never collide across iterations.
+            existing_tools: list[dict[str, Any]] | None = [
+                {"name": f"other_tool_{i}", "description": f"desc {i}"}
+            ]
+            try:
+                injector.inject_tool_definition(existing_tools)
+                counts["ccr"] += 1
+            except Exception as e:
+                LOG.debug("ccr inject failed on input %d: %s", i, e)
+
+        # --- ccr sticky-on path (session_has_done_ccr=True) ---
+        sticky_cases: list[list[dict[str, Any]] | None] = [
+            None,  # tools=None -> injects into a fresh list
+            [],  # empty tools -> injects
+            [{"name": "other_tool"}],  # single tool -> injects
+            [{"type": "function", "function": {"name": "other_tool"}}],  # MCP form -> injects
+            [{"name": "headroom_retrieve"}],  # already present (anthropic form) -> no-op
+            [  # already present (MCP form) -> no-op
+                {"type": "function", "function": {"name": "headroom_retrieve"}}
+            ],
+        ]
+        for i, tools in enumerate(sticky_cases):
+            injector = CCRToolInjector(provider="anthropic")
+            try:
+                injector.inject_tool_definition(tools, session_has_done_ccr=True)
+                counts["ccr"] += 1
+            except Exception as e:
+                LOG.debug("ccr sticky inject failed on case %d: %s", i, e)
+    except Exception as e:
+        LOG.warning("ccr workload failed: %s", e)
 
 
 def install_individual_grammar_parsers() -> None:

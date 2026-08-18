@@ -17,6 +17,7 @@
 
 pub mod adaptive_sizer;
 pub mod anchor_selector;
+pub mod cache_aligner;
 pub mod code_compressor;
 pub mod content_detector;
 pub mod detection;
@@ -53,10 +54,10 @@ pub use kompress::{
     DEFAULT_TOKENIZER_REPO,
 };
 pub use live_zone::{
-    compress_anthropic_live_zone, compress_openai_chat_live_zone,
-    compress_openai_responses_live_zone, summarize_openai_responses_no_change_reason, AuthMode,
-    BlockAction, BlockOutcome, CompressionManifest, ExclusionReason, LiveZoneError,
-    LiveZoneOutcome,
+    compress_anthropic_live_zone, compress_anthropic_live_zone_with_compressor,
+    compress_openai_chat_live_zone, compress_openai_responses_live_zone,
+    summarize_openai_responses_no_change_reason, AuthMode, BlockAction, BlockOutcome,
+    CompressionManifest, ExclusionReason, LiveZoneError, LiveZoneOutcome,
 };
 pub use log_compressor::{
     LogCompressionResult, LogCompressor, LogCompressorConfig, LogCompressorStats, LogFormat,
@@ -65,10 +66,10 @@ pub use log_compressor::{
 #[cfg(feature = "ml")]
 pub use magika_detector::{magika_detect, map_magika_label, MagikaDetectorError};
 pub use pipeline::{
-    CompressionContext, CompressionPipeline, CompressionPipelineBuilder, DiffNoise, DiffOffload,
-    JsonMinifier, JsonOffload, LogOffload, LogTemplate, OffloadOutput, OffloadTransform,
-    PipelineConfig, PipelineResult, ProseFieldOffload, ReformatOutput, ReformatTransform,
-    TransformError,
+    BlockCompressResult, BlockCompressor, BlockThresholds, CompressionContext, CompressionPipeline,
+    CompressionPipelineBuilder, DiffNoise, DiffOffload, JsonMinifier, JsonOffload, LogOffload,
+    LogTemplate, OffloadOutput, OffloadTransform, PipelineBlockCompressor, PipelineConfig,
+    PipelineResult, ProseFieldOffload, ReformatOutput, ReformatTransform, TransformError,
 };
 pub use recommendations::{Recommendation, RecommendationStore, RECOMMENDATIONS_PATH_ENV_VAR};
 pub use safety::{tool_pair_indices, ToolPair};

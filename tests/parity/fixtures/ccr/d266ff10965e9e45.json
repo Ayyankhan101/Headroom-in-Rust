@@ -20,10 +20,6 @@
             "hash": {
               "description": "Hash key from the compression marker (e.g., 'abc123' from hash=abc123)",
               "type": "string"
-            },
-            "query": {
-              "description": "Optional search query to filter results. If provided, only returns items matching the query. If omitted, returns all original items.",
-              "type": "string"
             }
           },
           "required": [
@@ -36,6 +32,6 @@
     ],
     true
   ],
-  "recorded_at": "2026-04-23T23:51:37.801596+00:00",
+  "recorded_at": "2026-08-17T08:53:46.164956+00:00",
   "transform": "ccr"
 }

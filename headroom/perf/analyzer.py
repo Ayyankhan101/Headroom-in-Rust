@@ -15,6 +15,7 @@ import os
 import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from headroom import paths as _paths
 from headroom.pricing.litellm_pricing import resolve_litellm_model
@@ -134,6 +135,16 @@ def _parse_kv(kv_str: str) -> dict[str, str]:
     return result
 
 
+def _decode_perf_savings(value: str) -> list[dict[str, object]]:
+    # Local import keeps the analyzer usable against old logs/install layouts.
+    try:
+        from headroom.proxy.savings_attribution import decode
+
+        return decode(value)
+    except Exception:
+        return []
+
+
 @dataclass
 class PerfRecord:
     """A single parsed PERF log entry."""
@@ -156,6 +167,12 @@ class PerfRecord:
     tokens_out: int = 0
     ttfb_ms: float = 0.0
     stages: dict[str, float] = field(default_factory=dict)
+    savings_breakdown: list[dict[str, object]] = field(default_factory=list)
+    # True when the proxy answered from its own response cache and never
+    # contacted the upstream. Such a turn has all-zero token counters and no
+    # upstream stage timings, so without this flag it reads as a turn that
+    # did nothing (#3019). Absent from pre-#3019 logs, hence the default.
+    from_response_cache: bool = False
 
 
 @dataclass
@@ -202,6 +219,10 @@ class PerfReport:
     transform_records: list[TransformRecord] = field(default_factory=list)
     toin_records: list[ToinRecord] = field(default_factory=list)
     log_files_read: int = 0
+    # Rotated files skipped unopened because they were last written before the
+    # requested window. Reported so coverage stays honest: `log_files_read` on
+    # its own would silently understate how much log exists on disk.
+    log_files_skipped: int = 0
     total_lines_parsed: int = 0
     # Window covered by the report. `requested_hours` is what the caller
     # asked for; `oldest_kept_ts` / `newest_kept_ts` are the actual
@@ -286,7 +307,31 @@ def parse_log_files(last_n_hours: float = 168.0) -> PerfReport:
             report.newest_kept_ts = ts_str
 
     # Collect log files: proxy.log, proxy.log.1, proxy.log.2, ...
-    log_files = sorted(log_dir.glob("proxy.log*"), key=lambda p: p.stat().st_mtime)
+    #
+    # A rotated file last written before the cutoff cannot contain a record
+    # inside the window, so skip it without opening it. Without this the cost
+    # of a windowed query is O(total log history) rather than O(window):
+    # `/stats` recomputes throughput over the last hour on a 10s cache TTL, so
+    # a dashboard polling it re-read and re-regexed every byte of every
+    # rotated log, forever, for an answer that lives in the tail of the newest
+    # file. Measured on a developer machine with six rotations (54 MB).
+    #
+    # mtime is the safe discriminator: the logs are append-only, so a file
+    # untouched since before the cutoff has no line written after it. Files
+    # are stat'd once and the value reused for the sort.
+    cutoff_epoch = cutoff.timestamp() if cutoff is not None else None
+    dated_files: list[tuple[float, Path]] = []
+    for path in log_dir.glob("proxy.log*"):
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            # Rotated away between glob and stat — nothing to read.
+            continue
+        if cutoff_epoch is not None and mtime < cutoff_epoch:
+            report.log_files_skipped += 1
+            continue
+        dated_files.append((mtime, path))
+    log_files = [path for _, path in sorted(dated_files, key=lambda pair: pair[0])]
 
     for log_file in log_files:
         report.log_files_read += 1
@@ -353,6 +398,7 @@ def parse_log_files(last_n_hours: float = 168.0) -> PerfReport:
                                 tokens_after=int(kv.get("tok_after", 0)),
                                 tokens_saved=int(kv.get("tok_saved", 0)),
                                 tool_saved=int(kv.get("tool_saved", 0)),
+                                savings_breakdown=_decode_perf_savings(kv.get("savings", "none")),
                                 cache_read=int(kv.get("cache_read", 0)),
                                 cache_write=int(kv.get("cache_write", 0)),
                                 cache_hit_pct=int(kv.get("cache_hit_pct", 0)),
@@ -361,6 +407,7 @@ def parse_log_files(last_n_hours: float = 168.0) -> PerfReport:
                                 total_ms=float(kv.get("total_ms", 0)),
                                 tokens_out=int(kv.get("tok_out", 0)),
                                 ttfb_ms=float(kv.get("ttfb_ms", 0)),
+                                from_response_cache=kv.get("cached", "0") == "1",
                                 stages=stages_by_rid.get(m.group("rid"), {}),
                             )
                         )
@@ -752,6 +799,10 @@ PERF_RECORD_FIELDS = [
     "tokens_out",
     "ttfb_ms",
     "stages",
+    "savings_breakdown",
+    # Appended last so every existing CSV column keeps its position; a reader
+    # that indexes by name is unaffected either way.
+    "from_response_cache",
 ]
 
 
@@ -1001,7 +1052,9 @@ def build_perf_summary(report: PerfReport) -> dict:
     for model, recs in sorted(by_model_groups.items()):
         m_before = sum(r.tokens_before for r in recs)
         m_after = sum(r.tokens_after for r in recs)
-        m_saved = sum(r.tokens_saved for r in recs)
+        m_message_saved = sum(r.tokens_saved for r in recs)
+        m_tool_saved = sum(r.tool_saved for r in recs)
+        m_saved = m_message_saved + m_tool_saved
         by_model.append(
             {
                 "model": model,
@@ -1009,7 +1062,9 @@ def build_perf_summary(report: PerfReport) -> dict:
                 "tokens_before": m_before,
                 "tokens_after": m_after,
                 "tokens_saved": m_saved,
-                "savings_pct": _pct(m_saved, m_before),
+                "message_tokens_saved": m_message_saved,
+                "tool_tokens_saved": m_tool_saved,
+                "savings_pct": _pct(m_saved, m_before + m_tool_saved),
                 "list_price_per_mtok": _get_list_price(model),
             }
         )
@@ -1032,6 +1087,37 @@ def build_perf_summary(report: PerfReport) -> dict:
                 "savings_pct": _pct(t_saved, t_before),
             }
         )
+
+    by_source_groups: dict[tuple[str, bool], dict[str, int | float | str | bool]] = {}
+    for record in records:
+        for item in record.savings_breakdown:
+            source = str(item.get("source") or "other")
+            realized = bool(item.get("realized", True))
+            key = (source, realized)
+            row = by_source_groups.setdefault(
+                key,
+                {
+                    "source": source,
+                    "realized": realized,
+                    "events": 0,
+                    "tokens": 0,
+                    "usd": 0.0,
+                },
+            )
+            row["events"] = int(row["events"]) + 1
+            raw_tokens = item.get("tokens", 0)
+            raw_usd = item.get("usd", 0.0)
+            tokens = int(raw_tokens) if isinstance(raw_tokens, (str, int, float)) else 0
+            usd = float(raw_usd) if isinstance(raw_usd, (str, int, float)) else 0.0
+            row["tokens"] = int(row["tokens"]) + max(0, tokens)
+            row["usd"] = round(
+                float(row["usd"]) + usd,
+                12,
+            )
+    by_source = sorted(
+        by_source_groups.values(),
+        key=lambda row: (-int(row["tokens"]), str(row["source"])),
+    )
 
     return {
         "window_hours": report.requested_hours,
@@ -1056,6 +1142,7 @@ def build_perf_summary(report: PerfReport) -> dict:
         "cache_hit_pct": cache_hit_pct,
         "by_model": by_model,
         "by_transform": by_transform,
+        "by_source": by_source,
         "overhead": build_overhead_summary(report),
         "throughput": calculate_throughput(report),
         "log_files_read": report.log_files_read,

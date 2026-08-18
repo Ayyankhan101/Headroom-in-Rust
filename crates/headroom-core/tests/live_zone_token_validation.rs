@@ -8,10 +8,12 @@
 //! property test: the dispatcher's emitted body has token-count <= the
 //! input's token-count for any well-formed body.
 
+use headroom_core::ccr::InMemoryCcrStore;
 use headroom_core::tokenizer::get_tokenizer;
 use headroom_core::transforms::live_zone::DEFAULT_MODEL;
 use headroom_core::transforms::{
-    compress_anthropic_live_zone, AuthMode, BlockAction, LiveZoneOutcome,
+    compress_anthropic_live_zone_with_compressor, AuthMode, BlockAction, BlockThresholds,
+    LiveZoneOutcome, PipelineBlockCompressor,
 };
 use proptest::prelude::*;
 use serde_json::{json, Value};
@@ -36,8 +38,19 @@ fn body_with_tool_result(text: &str) -> Vec<u8> {
 }
 
 fn dispatch(body: &[u8]) -> LiveZoneOutcome {
-    compress_anthropic_live_zone(body, 0, AuthMode::Payg, DEFAULT_MODEL)
-        .expect("dispatcher returns Ok on valid bodies")
+    let compressor = PipelineBlockCompressor::default();
+    let thresholds = BlockThresholds::default();
+    let store = InMemoryCcrStore::new();
+    compress_anthropic_live_zone_with_compressor(
+        body,
+        0,
+        AuthMode::Payg,
+        DEFAULT_MODEL,
+        Some(&store),
+        &compressor,
+        &thresholds,
+    )
+    .expect("dispatcher returns Ok on valid bodies")
 }
 
 fn first_tool_result_action(out: &LiveZoneOutcome) -> BlockAction {
@@ -229,11 +242,17 @@ proptest! {
         let body = body_with_tool_result(&payload);
         let body_tokens_in = token_count_of(&body);
 
-        let outcome = compress_anthropic_live_zone(
+        let compressor = PipelineBlockCompressor::default();
+        let thresholds = BlockThresholds::default();
+        let store = InMemoryCcrStore::new();
+        let outcome = compress_anthropic_live_zone_with_compressor(
             &body,
             0,
             AuthMode::Payg,
             DEFAULT_MODEL,
+            Some(&store),
+            &compressor,
+            &thresholds,
         )
         .expect("dispatcher returns Ok on valid bodies");
 

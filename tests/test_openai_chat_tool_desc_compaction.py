@@ -107,20 +107,3 @@ def test_disabled_by_default_leaves_tools_untouched():
     assert payload["tools"] == tools
     assert (before, after) == (0, 0)
 
-
-def test_chat_handler_calls_the_desc_pass(monkeypatch):
-    """Guard the wiring itself: the handler source must invoke the L2 pass.
-
-    ponytail: source-level check, not a live handler drive — spinning the full
-    chat-completions path needs an upstream, and the regression here was a missing
-    CALL, which is exactly what this catches.
-    """
-    import inspect
-
-    from headroom.proxy.handlers import openai as openai_handler
-
-    source = inspect.getsource(openai_handler)
-    assert "openai:chat:tool_desc_compaction" in source
-    # The Anthropic and Responses handlers already had their own labels; make sure
-    # the chat one is distinct so `headroom perf --by-transform` can attribute it.
-    assert "openai:responses:tool_desc_compaction" in source

@@ -517,26 +517,42 @@ def test_agent_90_router_json_tool_output_reaches_target_with_needle() -> None:
     assert "<<ccr:" in result.compressed
 
 
-def test_proxy_cli_reads_agent_90_profile_env() -> None:
-    captured_config: dict[str, ProxyConfig] = {}
+def test_proxy_cli_passes_agent_90_profile_env_to_rust_binary(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`headroom proxy` forwards HEADROOM_SAVINGS_PROFILE to the Rust binary.
 
-    def mock_run_server(config: ProxyConfig, **kwargs: object) -> None:
-        captured_config["config"] = config
+    PR-3.1: the Python server is retired and `headroom proxy` always spawns
+    the Rust `headroom-proxy` binary, which reads HEADROOM_SAVINGS_PROFILE /
+    HEADROOM_TARGET_RATIO from its env surface (health.rs config block).
+    """
+    fake_bin = tmp_path / "headroom-proxy"
+    fake_bin.write_text("#!/bin/sh\necho fake-rust-binary\n")
+    fake_bin.chmod(0o755)
+    monkeypatch.setenv("HEADROOM_PROXY_BACKEND_BIN", str(fake_bin))
+
+    captured: dict[str, object] = {}
+    import headroom.cli.proxy as p
+
+    monkeypatch.setattr(
+        p, "_spawn_rust_proxy", lambda cmd, **kw: captured.update(cmd=cmd, env=kw.get("env")) or object()
+    )
 
     runner = CliRunner()
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setattr("headroom.proxy.server.run_server", mock_run_server)
-        result = runner.invoke(
-            main,
-            ["proxy"],
-            env={"HEADROOM_SAVINGS_PROFILE": "agent-90"},
-            catch_exceptions=False,
-        )
+    result = runner.invoke(
+        main,
+        ["proxy"],
+        env={"HEADROOM_SAVINGS_PROFILE": "agent-90"},
+        catch_exceptions=False,
+    )
 
     assert result.exit_code == 0, result.output
-    config = captured_config["config"]
-    assert config.savings_profile == "agent-90"
-    assert proxy_pipeline_kwargs(config)["target_ratio"] == 0.10
+    env = captured["env"]
+    assert isinstance(env, dict)
+    assert env["HEADROOM_SAVINGS_PROFILE"] == "agent-90"
+    # The Rust binary resolves the agent-90 profile itself; the CLI only
+    # forwards the env var (it no longer constructs a Python ProxyConfig).
+    assert "headroom-proxy" in " ".join(captured["cmd"])
 
 
 def test_unit_router_receives_agent_target_ratio() -> None:

@@ -322,7 +322,7 @@ pub struct CliArgs {
     /// Off by default so existing operators get unchanged behaviour
     /// and the integration-test harness doesn't need to opt out
     /// per-test. Operators wanting to demo the compressor pass
-    /// `--compression` (or set `HEADROOM_PROXY_COMPRESSION=1`).
+    /// `--compression` (or set `HEADROOM_PROXY_COMPRESSION=true`).
     #[arg(
         long = "compression",
         env = "HEADROOM_PROXY_COMPRESSION",

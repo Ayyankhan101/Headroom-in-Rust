@@ -9,7 +9,7 @@ asserting the output matches the recording byte-for-byte.
 
 Skipped automatically when the `headroom._core` wheel isn't installed
 (e.g. CI lane without the maturin step). The Rust crate's own
-`cargo run -p headroom-parity` covers the same fixtures from the Rust
+`cargo run -p headroom-version-parity` covers the same fixtures from the Rust
 side; this Python-side test catches PyO3 bridge regressions
 (input/output mistranslation) that the Rust-only test cannot.
 """
@@ -57,7 +57,7 @@ def test_at_least_27_fixtures_present():
 def test_rust_backend_matches_recorded_output(fixture_path: Path):
     """Replay each recorded input through the Rust backend; every output
     field must match the recording. Any mismatch is a PyO3 bridge bug or a
-    real Rust regression (cross-check with `cargo run -p headroom-parity`
+    real Rust regression (cross-check with `cargo run -p headroom-version-parity`
     to localize).
     """
     from headroom.transforms.diff_compressor import DiffCompressor, DiffCompressorConfig

@@ -1,5 +1,7 @@
 # Phase H — Python Proxy Retirement
 
+> **SUPERSEDED (2026-08-14):** This phase is superseded by Phase 3 of `docs/superpowers/plans/2026-08-14-finish-python-to-rust-conversion.md` (PRs 3.1/3.2/3.3 map to H1/H2/H3, refreshed against the current tree — including the new `HEADROOM_PROXY_BACKEND` switch, re-recorded parity fixtures, and the `/health` contract). Retained here for history; do not execute from this file directly.
+
 **Goal:** With Rust at full parity (Phases A–G), delete the Python proxy server, handlers, transforms, and supporting modules. Keep Python only where it's the right tool: CLI wrappers, RTK installer, evals, learn, memory writers, tokenizers (parity backstop).
 
 **Calendar:** 2 weeks.

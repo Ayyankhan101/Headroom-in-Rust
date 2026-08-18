@@ -46,7 +46,7 @@
 //! match to ~1e-6 (far below the 0.5 threshold), and the kept-word set +
 //! joined output match byte-for-byte. See
 //! `tests/parity/fixtures/kompress/` and `KompressComparator` in
-//! `crates/headroom-parity`.
+//! `crates/headroom-version-parity`.
 //!
 //! # CCR
 //!
@@ -577,6 +577,27 @@ fn load_tokenizer(path: &Path, repo: &str) -> Result<Tokenizer, KompressError> {
 }
 
 fn build_session(path: &Path) -> Result<Session, Box<dyn std::error::Error + Send + Sync>> {
+    // Fail loud instead of deadlocking (BASELINE.md Finding F1): with the
+    // `kompress-v2-base` model cached but the ONNX Runtime dylib unpinned,
+    // `Session::builder()` deadlocks inside `ort::load_dylib_from_path`
+    // (re-entrant `Once` → `semaphore_wait_trap`, 0% CPU). Pin/discover the
+    // dylib first, exactly like the magika detector and the embedding scorer
+    // do — when it is unavailable this returns a loud error naming
+    // `ORT_DYLIB_PATH` / `onnxruntime` instead of hanging.
+    crate::transforms::magika_detector::dynamic_ort_loader_ready().map_err(|reason| {
+        // Include an actionable hint: the model was already found in the
+        // local HF cache (we only reach `build_session` with real paths), so
+        // a dev blocked here needs to know the dylib is the missing piece.
+        let msg: Box<dyn std::error::Error + Send + Sync> = format!(
+            "ONNX Runtime unavailable: {reason}. \
+             The kompress model is cached locally; to run kompress, \
+             `pip install onnxruntime` or set ORT_DYLIB_PATH to your \
+             onnxruntime shared library (e.g. the path shown in \
+             DEV.md / docs/operations/python-to-rust-migration.md)."
+        )
+        .into();
+        msg
+    })?;
     let session = Session::builder()?.commit_from_file(path)?;
     Ok(session)
 }

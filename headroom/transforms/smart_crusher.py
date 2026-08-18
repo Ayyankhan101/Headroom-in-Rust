@@ -347,7 +347,7 @@ class SmartCrusher(Transform):
                 "SmartCrusher: custom `relevance_config` / `scorer` "
                 "overrides are not yet supported by the Rust-backed "
                 "implementation. Pass `None` to use the default "
-                "HybridScorer. Tracked in RUST_DEV.md; full support "
+                "HybridScorer. Tracked in DEV.md; full support "
                 "lands with Stage 3c.2's relevance-crate Python bridge."
             )
 

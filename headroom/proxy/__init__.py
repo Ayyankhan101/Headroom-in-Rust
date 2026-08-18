@@ -1,27 +1,7 @@
-"""Headroom Proxy Server.
+"""Headroom proxy package.
 
-A transparent proxy that sits between LLM clients (Claude Code, Cursor, etc.)
-and LLM APIs (Anthropic, OpenAI), applying Headroom optimizations.
-
-Usage:
-    # Start the proxy
-    python -m headroom.proxy.server
-
-    # Use with Claude Code
-    ANTHROPIC_BASE_URL=http://localhost:8787 claude
-
-    # Use with Cursor (if using Anthropic)
-    Set base URL in Cursor settings to http://localhost:8787
+The Python FastAPI proxy server was retired in PR-3.1; ``headroom proxy``
+and ``wrap`` now run the Rust ``headroom-proxy`` binary. A small set of
+modules survives here because off-path Python code (providers, CLI, evals,
+integrations) still imports them; PR-3.3 relocates or retires them.
 """
-
-__all__ = ["create_app", "run_server"]
-
-
-def __getattr__(name: str) -> object:
-    if name in ("create_app", "run_server"):
-        from .server import create_app, run_server  # noqa: F811
-
-        globals()["create_app"] = create_app
-        globals()["run_server"] = run_server
-        return globals()[name]
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

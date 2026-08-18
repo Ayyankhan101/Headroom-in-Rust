@@ -252,7 +252,7 @@ jobs:
         with:
           toolchain: 1.95.0
       - uses: Swatinem/rust-cache@v2
-      # No Python toolchain: headroom-parity links headroom-core directly and
+      # No Python toolchain: headroom-version-parity links headroom-core directly and
       # never crosses into the interpreter, so the venv + maturin + `pip
       # install -e .` setup this job used to do was pure overhead.
       - name: Run parity harness

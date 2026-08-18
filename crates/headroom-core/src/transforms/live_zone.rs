@@ -108,6 +108,9 @@ use super::search_compressor::{SearchCompressor, SearchCompressorConfig};
 use super::smart_crusher::{SmartCrusher, SmartCrusherConfig};
 use crate::ccr::{compute_key, marker_for, CcrStore};
 use crate::tokenizer::get_tokenizer;
+use crate::transforms::pipeline::block_compressor::BlockCompressor;
+use crate::transforms::pipeline::config::BlockThresholds;
+use crate::transforms::pipeline::traits::CompressionContext;
 
 // ─── Tunable constants (no magic numbers in the dispatch logic) ────────
 
@@ -144,45 +147,22 @@ pub const DEFAULT_MODEL: &str = "claude-3-5-sonnet-20241022";
 // bookkeeping, log lines) costs more than the marginal token savings,
 // and tiny inputs almost never compress at all.
 //
-// Sourced from the spec (`REALIGNMENT/04-phase-B-live-zone.md::PR-B4`).
-// Pinned as `const` rather than a hard-coded `match` so the values are
-// grep-able and reviewable in one place.
+// These are now sourced from [`BlockThresholds`] in the pipeline
+// config. The old hardcoded constants are kept as fallback defaults
+// for the legacy `compress_one_block` path (used by tests); new code
+// should use [`compress_anthropic_live_zone_with_compressor`] which
+// reads thresholds from config.
 
-/// JSON-array tool_results below this size route to no-op.
-const THRESHOLD_JSON_ARRAY: usize = 512;
-/// Build / log output below this size routes to no-op (512 B). Logs
-/// are the most repetitive content type so the threshold is the
-/// lowest of the bunch.
-const THRESHOLD_BUILD_OUTPUT: usize = 512;
-/// Search-result blocks below this size route to no-op.
-const THRESHOLD_SEARCH_RESULTS: usize = 512;
-/// Git-diff blocks below this size route to no-op.
-const THRESHOLD_GIT_DIFF: usize = 512;
-/// Source-code blocks below this size route to no-op. Pinned
-/// for the future Rust code-compressor port — currently unused
-/// because `ContentType::SourceCode` short-circuits to no-op above
-/// the dispatch (see `dispatch_compressor`).
-const THRESHOLD_SOURCE_CODE: usize = 512;
-/// Plain-text blocks below this size route to no-op. Pinned
-/// for the future Kompress wiring (PR-B7 follow-up); currently unused.
-const THRESHOLD_PLAIN_TEXT: usize = 512;
-/// HTML blocks have no compressor; threshold matches plain text so
-/// when an HTML compressor lands the value is already pinned.
-const THRESHOLD_HTML: usize = 512;
+/// Default thresholds matching the pipeline config defaults.
+fn default_thresholds() -> BlockThresholds {
+    BlockThresholds::default()
+}
 
-/// Map a content type to its byte threshold. Returning `usize` rather
-/// than an `Option` because every variant has a sensible default;
-/// `Html` is a no-op anyway so the threshold check never fires.
+/// Legacy threshold lookup for the old `compress_one_block` path.
+/// Deprecated: use [`BlockThresholds::threshold_for`] instead.
+#[allow(dead_code)]
 fn threshold_for(content_type: ContentType) -> usize {
-    match content_type {
-        ContentType::JsonArray => THRESHOLD_JSON_ARRAY,
-        ContentType::BuildOutput => THRESHOLD_BUILD_OUTPUT,
-        ContentType::SearchResults => THRESHOLD_SEARCH_RESULTS,
-        ContentType::GitDiff => THRESHOLD_GIT_DIFF,
-        ContentType::SourceCode => THRESHOLD_SOURCE_CODE,
-        ContentType::PlainText => THRESHOLD_PLAIN_TEXT,
-        ContentType::Html => THRESHOLD_HTML,
-    }
+    default_thresholds().threshold_for(content_type)
 }
 
 // ─── Public types ──────────────────────────────────────────────────────
@@ -805,6 +785,152 @@ pub fn compress_anthropic_live_zone_with_ccr(
     })
 }
 
+/// Same as [`compress_anthropic_live_zone_with_ccr`] but uses the
+/// provided [`BlockCompressor`] instead of the hardcoded dispatch
+/// table. This is the entry point for the pipeline-backed dispatcher.
+pub fn compress_anthropic_live_zone_with_compressor(
+    body_raw: &[u8],
+    frozen_message_count: usize,
+    _auth_mode: AuthMode,
+    model: &str,
+    ccr_store: Option<&dyn CcrStore>,
+    compressor: &dyn BlockCompressor,
+    thresholds: &BlockThresholds,
+) -> Result<LiveZoneOutcome, LiveZoneError> {
+    let parsed: Value = serde_json::from_slice(body_raw).map_err(LiveZoneError::BodyNotJson)?;
+    let messages = parsed
+        .get("messages")
+        .and_then(Value::as_array)
+        .ok_or(LiveZoneError::NoMessagesArray)?;
+
+    if messages.is_empty() {
+        return Ok(LiveZoneOutcome::NoChange {
+            manifest: CompressionManifest::empty(),
+        });
+    }
+
+    let messages_total = messages.len();
+    let messages_below_frozen_floor = frozen_message_count.min(messages_total);
+
+    let latest_user_message_index = find_latest_user_message_index(messages, frozen_message_count);
+
+    let Some(target_idx) = latest_user_message_index else {
+        return Ok(LiveZoneOutcome::NoChange {
+            manifest: CompressionManifest {
+                messages_total,
+                messages_below_frozen_floor,
+                latest_user_message_index: None,
+                block_outcomes: Vec::new(),
+            },
+        });
+    };
+
+    let plan = match plan_block_replacements(body_raw, target_idx) {
+        Ok(p) => p,
+        Err(_) => {
+            let block_outcomes =
+                inspect_latest_user_blocks_value(&messages[target_idx], target_idx)
+                    .unwrap_or_default();
+            return Ok(LiveZoneOutcome::NoChange {
+                manifest: CompressionManifest {
+                    messages_total,
+                    messages_below_frozen_floor,
+                    latest_user_message_index: Some(target_idx),
+                    block_outcomes,
+                },
+            });
+        }
+    };
+
+    let mut block_outcomes: Vec<BlockOutcome> = Vec::with_capacity(plan.len());
+    let mut replacements: Vec<Replacement> = Vec::new();
+    let tokenizer = get_tokenizer(model);
+
+    for slot in plan {
+        let outcome = match slot.kind {
+            SlotKind::HotZone(block_type) => BlockOutcome {
+                message_index: target_idx,
+                block_index: Some(slot.block_index),
+                block_type,
+                action: BlockAction::Excluded {
+                    reason: ExclusionReason::HotZoneBlockType,
+                },
+            },
+            SlotKind::Compressible {
+                block_type,
+                content_text,
+                content_byte_range,
+            } => {
+                let detected = detect_content_type(&content_text);
+                compress_one_block_with_compressor(
+                    &content_text,
+                    detected.content_type,
+                    content_byte_range,
+                    target_idx,
+                    Some(slot.block_index),
+                    block_type,
+                    tokenizer.as_ref(),
+                    &mut replacements,
+                    ccr_store,
+                    compressor,
+                    thresholds,
+                )
+            }
+            SlotKind::StringContent {
+                content_text,
+                content_byte_range,
+            } => {
+                let detected = detect_content_type(&content_text);
+                compress_one_block_with_compressor(
+                    &content_text,
+                    detected.content_type,
+                    content_byte_range,
+                    target_idx,
+                    None,
+                    "string_content".to_string(),
+                    tokenizer.as_ref(),
+                    &mut replacements,
+                    ccr_store,
+                    compressor,
+                    thresholds,
+                )
+            }
+        };
+        block_outcomes.push(outcome);
+    }
+
+    let manifest = CompressionManifest {
+        messages_total,
+        messages_below_frozen_floor,
+        latest_user_message_index: Some(target_idx),
+        block_outcomes,
+    };
+
+    if !manifest.has_compressed_block() || replacements.is_empty() {
+        return Ok(LiveZoneOutcome::NoChange { manifest });
+    }
+
+    let new_bytes = apply_replacements(body_raw, &mut replacements);
+
+    let new_body_str = match std::str::from_utf8(&new_bytes) {
+        Ok(s) => s,
+        Err(_) => {
+            return Ok(LiveZoneOutcome::NoChange { manifest });
+        }
+    };
+    let raw = match RawValue::from_string(new_body_str.to_string()) {
+        Ok(r) => r,
+        Err(_) => {
+            return Ok(LiveZoneOutcome::NoChange { manifest });
+        }
+    };
+
+    Ok(LiveZoneOutcome::Modified {
+        new_body: raw,
+        manifest,
+    })
+}
+
 // ─── Internal helpers ──────────────────────────────────────────────────
 
 /// Per-block dispatch shared by the array-of-blocks slot and the
@@ -934,6 +1060,96 @@ fn compress_one_block(
             block_type,
             action: BlockAction::CompressorError { strategy, error },
         },
+    }
+}
+
+/// Same as [`compress_one_block`] but uses the provided
+/// [`BlockCompressor`] instead of the hardcoded dispatch table.
+#[allow(clippy::too_many_arguments)]
+fn compress_one_block_with_compressor(
+    content_text: &str,
+    content_type: ContentType,
+    content_byte_range: (usize, usize),
+    message_index: usize,
+    block_index: Option<usize>,
+    block_type: String,
+    tokenizer: &dyn crate::tokenizer::Tokenizer,
+    replacements: &mut Vec<Replacement>,
+    ccr_store: Option<&dyn CcrStore>,
+    compressor: &dyn BlockCompressor,
+    thresholds: &BlockThresholds,
+) -> BlockOutcome {
+    // 1. Byte-threshold gate.
+    if !content_text.is_empty() && content_text.len() < thresholds.threshold_for(content_type) {
+        return BlockOutcome {
+            message_index,
+            block_index,
+            block_type,
+            action: BlockAction::BelowByteThreshold {
+                content_type: content_type.as_str(),
+                byte_count: content_text.len(),
+                threshold_bytes: thresholds.threshold_for(content_type),
+            },
+        };
+    }
+
+    // 2. Compress via the pipeline-backed compressor.
+    let ctx = CompressionContext::default();
+    let result = compressor.compress(content_text, content_type, &ctx, ccr_store);
+
+    if result.bytes_saved == 0 {
+        return BlockOutcome {
+            message_index,
+            block_index,
+            block_type,
+            action: BlockAction::NoCompressionApplied {
+                content_type: content_type.as_str().to_string(),
+            },
+        };
+    }
+
+    // 3. Tokenizer-validated rejection.
+    let (compressed_for_replacement, ccr_hash_emitted) =
+        maybe_inject_ccr_marker(content_text, &result.output, ccr_store);
+    let compressed_bytes = compressed_for_replacement.len();
+    let original_tokens = tokenizer.count_text(content_text);
+    let compressed_tokens = tokenizer.count_text(&compressed_for_replacement);
+    if compressed_tokens >= original_tokens {
+        BlockOutcome {
+            message_index,
+            block_index,
+            block_type,
+            action: BlockAction::RejectedNotSmaller {
+                strategy: result.strategy,
+                original_bytes: content_text.len(),
+                compressed_bytes,
+                original_tokens,
+                compressed_tokens,
+            },
+        }
+    } else {
+        // Persist to CCR store.
+        if let (Some(store), Some(hash)) = (ccr_store, ccr_hash_emitted.as_deref()) {
+            store.put(hash, content_text);
+        }
+        let replacement_bytes = serde_json::to_vec(&compressed_for_replacement)
+            .expect("string is always JSON-encodable");
+        replacements.push(Replacement {
+            range: content_byte_range,
+            replacement: replacement_bytes,
+        });
+        BlockOutcome {
+            message_index,
+            block_index,
+            block_type,
+            action: BlockAction::Compressed {
+                strategy: result.strategy,
+                original_bytes: content_text.len(),
+                compressed_bytes,
+                original_tokens,
+                compressed_tokens,
+            },
+        }
     }
 }
 

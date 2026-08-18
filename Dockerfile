@@ -47,7 +47,10 @@ COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY crates/ crates/
 COPY headroom/ headroom/
 
-ARG HEADROOM_EXTRAS=proxy,code
+# The standalone Dockerfile must support every backend advertised by
+# `headroom proxy --backend`, including Bedrock temporary/SSO credentials.
+# Those credentials require botocore (GH #1551), supplied by [bedrock].
+ARG HEADROOM_EXTRAS=proxy,code,bedrock
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
@@ -225,6 +228,20 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 
 ENTRYPOINT ["python3", "-m", "headroom.cli", "proxy"]
 CMD ["--host", "0.0.0.0", "--port", "8787"]
+
+# ---- Runtime stage (pure Rust proxy) ----
+# Single-binary image for proxy-only deployments (~50 MB vs ~500 MB Python).
+# No Python, no shell, no package manager — just the static Rust binary.
+FROM gcr.io/distroless/static-debian12:nonroot AS runtime-proxy
+
+COPY --from=builder /usr/local/bin/headroom-proxy /headroom-proxy
+
+EXPOSE 8787
+
+# No HEALTHCHECK — distroless static has no shell or curl. Orchestrators
+# should probe /healthz directly (Kubernetes livenessProbe, ECS healthCheck).
+
+ENTRYPOINT ["/headroom-proxy"]
 
 # Default published image remains python-slim runtime
 FROM runtime-slim-base AS runtime

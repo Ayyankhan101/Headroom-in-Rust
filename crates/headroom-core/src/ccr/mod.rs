@@ -30,6 +30,7 @@
 //! [`CompressionStore`]: https://github.com/chopratejas/headroom/blob/main/headroom/cache/compression_store.py
 
 pub mod backends;
+pub mod tool_injection;
 
 use std::time::Duration;
 

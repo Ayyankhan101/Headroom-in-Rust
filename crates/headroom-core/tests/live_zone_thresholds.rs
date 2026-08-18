@@ -4,9 +4,11 @@
 //! content is below the per-content-type byte threshold (1 KiB for
 //! JSON arrays). PR-B4 spec, `REALIGNMENT/04-phase-B-live-zone.md`.
 
+use headroom_core::ccr::InMemoryCcrStore;
 use headroom_core::transforms::live_zone::DEFAULT_MODEL;
 use headroom_core::transforms::{
-    compress_anthropic_live_zone, AuthMode, BlockAction, LiveZoneOutcome,
+    compress_anthropic_live_zone_with_compressor, AuthMode, BlockAction, BlockThresholds,
+    LiveZoneOutcome, PipelineBlockCompressor,
 };
 use serde_json::{json, Value};
 
@@ -31,8 +33,19 @@ fn body_with_tool_result(text: &str) -> Vec<u8> {
 }
 
 fn dispatch(body: &[u8]) -> LiveZoneOutcome {
-    compress_anthropic_live_zone(body, 0, AuthMode::Payg, DEFAULT_MODEL)
-        .expect("dispatcher returns Ok on valid bodies")
+    let compressor = PipelineBlockCompressor::default();
+    let thresholds = BlockThresholds::default();
+    let store = InMemoryCcrStore::new();
+    compress_anthropic_live_zone_with_compressor(
+        body,
+        0,
+        AuthMode::Payg,
+        DEFAULT_MODEL,
+        Some(&store),
+        &compressor,
+        &thresholds,
+    )
+    .expect("dispatcher returns Ok on valid bodies")
 }
 
 fn first_tool_result_action(out: &LiveZoneOutcome) -> BlockAction {

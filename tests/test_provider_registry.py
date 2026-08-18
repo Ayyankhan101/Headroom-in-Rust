@@ -113,40 +113,22 @@ def test_proxy_provider_runtime_routes_model_metadata_and_passthrough() -> None:
     )
 
 
-def test_create_proxy_backend_handles_missing_litellm_backend(caplog) -> None:
-    logger = logging.getLogger("test")
-
-    with caplog.at_level(logging.WARNING):
-        missing = create_proxy_backend(
-            backend="bedrock",
-            anyllm_provider="ignored",
-            bedrock_region="us-east-1",
-            logger=logger,
-            litellm_backend_cls=lambda provider, region, profile_name=None: (_ for _ in ()).throw(
-                ImportError("missing")
-            ),
-        )
-
-    assert missing is None
-    assert "LiteLLM backend not available" in caplog.text
-
-
 def test_create_proxy_backend_logs_structured_failure_details(caplog) -> None:
     logger = logging.getLogger("test")
 
     with caplog.at_level(logging.ERROR):
         missing = create_proxy_backend(
-            backend="bedrock",
-            anyllm_provider="ignored",
-            bedrock_region="us-east-1",
+            backend="anyllm",
+            anyllm_provider="groq",
+            bedrock_region=None,
             logger=logger,
-            litellm_backend_cls=lambda provider, region, profile_name=None: (_ for _ in ()).throw(
+            anyllm_backend_cls=lambda provider, api_base: (_ for _ in ()).throw(
                 RuntimeError("boom")
             ),
         )
 
     assert missing is None
-    assert "backend initialization failed: backend=litellm-bedrock provider=bedrock error=boom" in (
+    assert "backend initialization failed: backend=anyllm provider=groq error=boom" in (
         caplog.text
     )
 
@@ -155,34 +137,23 @@ def test_proxy_provider_runtime_loaders_cache_backend_types(monkeypatch) -> None
     import headroom.providers.registry as registry
 
     anyllm_loads = 0
-    litellm_loads = 0
 
     class FakeAnyLLMBackend:
         pass
 
-    class FakeLiteLLMBackend:
-        pass
-
     def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
-        nonlocal anyllm_loads, litellm_loads
+        nonlocal anyllm_loads
         if name == "headroom.backends.anyllm":
             anyllm_loads += 1
             return type("Module", (), {"AnyLLMBackend": FakeAnyLLMBackend})()
-        if name == "headroom.backends.litellm":
-            litellm_loads += 1
-            return type("Module", (), {"LiteLLMBackend": FakeLiteLLMBackend})()
         raise AssertionError(name)
 
     monkeypatch.setattr(registry, "AnyLLMBackendType", None)
-    monkeypatch.setattr(registry, "LiteLLMBackendType", None)
     monkeypatch.setattr("builtins.__import__", fake_import)
 
     assert registry._load_anyllm_backend() is FakeAnyLLMBackend
     assert registry._load_anyllm_backend() is FakeAnyLLMBackend
-    assert registry._load_litellm_backend() is FakeLiteLLMBackend
-    assert registry._load_litellm_backend() is FakeLiteLLMBackend
     assert anyllm_loads == 1
-    assert litellm_loads == 1
 
 
 def test_proxy_provider_runtime_transport_helpers_handle_missing_usage() -> None:

@@ -32,7 +32,24 @@ import httpx
 from headroom import paths as _paths
 
 if TYPE_CHECKING:
-    from headroom.proxy.server import HeadroomProxy
+    from typing import Protocol
+
+    class CostTracker(Protocol):
+        """Minimal structural type for the proxy's cost tracker."""
+
+        _tokens_saved_by_model: dict[str, int]
+        _tokens_sent_by_model: dict[str, int]
+        _requests_by_model: dict[str, int]
+
+    class HeadroomProxy(Protocol):
+        """Structural type for the proxy object the reporter wraps.
+
+        The Python proxy (``headroom.proxy.server.HeadroomProxy``) was retired
+        in PR-3.1; the reporter now only relies on the ``cost_tracker``
+        attribute it consumed.
+        """
+
+        cost_tracker: CostTracker | None
 
 logger = logging.getLogger("headroom.telemetry.reporter")
 

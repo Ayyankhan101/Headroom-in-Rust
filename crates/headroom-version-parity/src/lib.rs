@@ -1,0 +1,1162 @@
+//! Version-parity harness: the recorded fixtures under `tests/parity/fixtures/`
+//! freeze each transform's accepted output (originally produced by the Python
+//! implementation, now retired from the request path). Every comparator runs
+//! the *current* Rust implementation against that recorded *previous* output,
+//! so a future compressor change (e.g. a Kompress variant) that drifts from
+//! the frozen behavior is caught as a `Diff` on the next `make test-parity`.
+//!
+//! All ten comparators are real. The gate's exit criterion is zero `Skipped`
+//! on request-path transforms.
+
+use anyhow::{bail, Context, Result};
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::{Path, PathBuf};
+
+/// Recorded fixture schema. Matches `tests/parity/recorder.py`. `output` is
+/// the frozen *previous-version* result the current Rust implementation must
+/// reproduce byte-for-byte.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct Fixture {
+    pub transform: String,
+    pub input: serde_json::Value,
+    #[serde(default)]
+    pub config: serde_json::Value,
+    pub output: serde_json::Value,
+    #[serde(default)]
+    pub recorded_at: String,
+    #[serde(default)]
+    pub input_sha256: String,
+}
+
+/// Outcome of comparing a recorded (previous-version) fixture output against
+/// the current Rust implementation.
+#[derive(Debug, Clone)]
+pub enum ComparisonOutcome {
+    Match,
+    Diff { previous: String, current: String },
+    Skipped { reason: String },
+}
+
+/// Trait implemented by transform-specific comparators. A comparator receives
+/// the fixture's input and config and produces a JSON value to compare against
+/// `fixture.output`.
+pub trait TransformComparator {
+    fn name(&self) -> &str;
+    fn run(
+        &self,
+        input: &serde_json::Value,
+        config: &serde_json::Value,
+    ) -> Result<serde_json::Value>;
+}
+
+/// Compare a recorded fixture (its `output` = previous-version result) against
+/// the current Rust comparator output and return an outcome.
+///
+/// f64 normalization: `serde_json` (without the `arbitrary_precision`
+/// feature) has an asymmetry — values constructed via `json!(f64)` keep
+/// full precision (e.g. `0.9500000000000001`), but values parsed from
+/// fixture JSON sometimes round to a neighboring f64 (e.g. `0.95`,
+/// differing by 1 ULP). To make comparisons robust we round-trip the
+/// comparator's output through `to_string` + `from_str` so it goes
+/// through the same lossy parser the fixture did. Bit-identical f64s
+/// from both sides then compare equal.
+pub fn compare_fixture(
+    comparator: &dyn TransformComparator,
+    fixture: &Fixture,
+) -> Result<ComparisonOutcome> {
+    let current = match comparator.run(&fixture.input, &fixture.config) {
+        Ok(v) => v,
+        Err(e) => {
+            return Ok(ComparisonOutcome::Skipped {
+                reason: format!("comparator error: {e}"),
+            })
+        }
+    };
+    let current_normalized: serde_json::Value =
+        serde_json::from_str(&serde_json::to_string(&current)?)
+            .context("re-parsing comparator output through serde_json (f64 normalization)")?;
+    if current_normalized == fixture.output {
+        Ok(ComparisonOutcome::Match)
+    } else {
+        Ok(ComparisonOutcome::Diff {
+            previous: serde_json::to_string_pretty(&fixture.output)?,
+            current: serde_json::to_string_pretty(&current_normalized)?,
+        })
+    }
+}
+
+/// Load every `*.json` fixture under `dir/<transform>/`.
+pub fn load_fixtures_for(dir: &Path, transform: &str) -> Result<Vec<(PathBuf, Fixture)>> {
+    let root = dir.join(transform);
+    if !root.exists() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    for entry in fs::read_dir(&root).with_context(|| format!("reading {}", root.display()))? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+        let bytes = fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
+        let fixture: Fixture = serde_json::from_slice(&bytes)
+            .with_context(|| format!("parsing fixture {}", path.display()))?;
+        if fixture.transform != transform {
+            bail!(
+                "fixture {} declares transform={} but lives under {}",
+                path.display(),
+                fixture.transform,
+                transform
+            );
+        }
+        out.push((path, fixture));
+    }
+    Ok(out)
+}
+
+/// Aggregate report of one version-parity run.
+#[derive(Debug, Default)]
+pub struct Report {
+    pub matched: usize,
+    pub diffed: Vec<(PathBuf, String, String)>,
+    pub skipped: Vec<(PathBuf, String)>,
+}
+
+impl Report {
+    pub fn total(&self) -> usize {
+        self.matched + self.diffed.len() + self.skipped.len()
+    }
+    pub fn is_clean(&self) -> bool {
+        self.diffed.is_empty()
+    }
+}
+
+/// Run a comparator over every fixture under `dir/<transform>/` and return a
+/// report. Propagates IO/parse errors but never panics on comparator errors —
+/// those become `Skipped` entries.
+pub fn run_comparator(dir: &Path, comparator: &dyn TransformComparator) -> Result<Report> {
+    let mut report = Report::default();
+    let fixtures = load_fixtures_for(dir, comparator.name())?;
+    for (path, fixture) in fixtures {
+        match compare_fixture(comparator, &fixture)? {
+            ComparisonOutcome::Match => report.matched += 1,
+            ComparisonOutcome::Diff { previous, current } => {
+                report.diffed.push((path, previous, current));
+            }
+            ComparisonOutcome::Skipped { reason } => {
+                report.skipped.push((path, reason));
+            }
+        }
+    }
+    Ok(report)
+}
+
+/// Real comparator for the `cache_aligner` transform. Fixture input is a
+/// messages array; output is the detector-only `TransformResult` shape
+/// the Python recorder serialized (all fields via `asdict`): messages
+/// unchanged, `warnings` + `cache_metrics` populated, and the fixed
+/// `transforms_applied=[]` / null / empty fields.
+///
+/// The recorder drove `OpenAITokenCounter("gpt-4o-mini")`, so token
+/// counts are o200k_base — rebuilt via `TiktokenCounter`. Config is
+/// ignored: the detector-only Python `apply` never reads it (the legacy
+/// `date_patterns` / `detection_tiers` / `entropy_threshold` surface is
+/// unused in the detector path).
+pub struct CacheAlignerComparator;
+
+impl TransformComparator for CacheAlignerComparator {
+    fn name(&self) -> &str {
+        "cache_aligner"
+    }
+
+    fn run(
+        &self,
+        input: &serde_json::Value,
+        _config: &serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        use headroom_core::tokenizer::{TiktokenCounter, Tokenizer};
+        use headroom_core::transforms::cache_aligner::detect_cache_volatility;
+
+        let messages = input
+            .as_array()
+            .context("cache_aligner fixture input must be a JSON array of messages")?;
+        let counter = TiktokenCounter::for_model("gpt-4o-mini")
+            .context("init TiktokenCounter for gpt-4o-mini")?;
+        let result = detect_cache_volatility(messages, |t| counter.count_text(t));
+
+        Ok(serde_json::json!({
+            "cache_metrics": {
+                "stable_prefix_bytes": result.cache_metrics.stable_prefix_bytes,
+                "stable_prefix_tokens_est": result.cache_metrics.stable_prefix_tokens_est,
+                "stable_prefix_hash": result.cache_metrics.stable_prefix_hash,
+                "prefix_changed": result.cache_metrics.prefix_changed,
+                "previous_hash": result.cache_metrics.previous_hash,
+            },
+            "diff_artifact": serde_json::Value::Null,
+            "markers_inserted": result.markers_inserted,
+            "messages": result.messages,
+            "timing": serde_json::json!({}),
+            "tokens_after": result.tokens_after,
+            "tokens_before": result.tokens_before,
+            "transforms_applied": serde_json::json!([]),
+            "warnings": result.warnings,
+            "waste_signals": serde_json::Value::Null,
+        }))
+    }
+}
+
+/// Real comparator for the `ccr` transform. Fixture input is a tools
+/// array (or `null` — the recorder's `tools=None` sticky case); output
+/// is the 2-element JSON array `[tools_with_injected, bool]` that
+/// Python's tuple `(updated_tools, was_injected)` serialized to.
+///
+/// Matches the sticky-on path: `session_has_done_ccr=True` so the tool
+/// is injected even when the input carries no compression markers. The
+/// fixtures were re-recorded with provider="anthropic" for every case
+/// (the fixture `config` is `{}`, so a comparator cannot know the
+/// provider), which is the definition this comparator emits.
+pub struct CcrComparator;
+
+impl TransformComparator for CcrComparator {
+    fn name(&self) -> &str {
+        "ccr"
+    }
+
+    fn run(
+        &self,
+        input: &serde_json::Value,
+        _config: &serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        use headroom_core::ccr::tool_injection::inject_retrieve_tool;
+
+        // `tools=None` is recorded as JSON `null`; Python injects into a
+        // fresh list, so treat null as an empty tools array.
+        let tools: Vec<serde_json::Value> = match input {
+            serde_json::Value::Null => Vec::new(),
+            _ => input
+                .as_array()
+                .context("ccr fixture input must be a JSON array of tools")?
+                .clone(),
+        };
+        let (updated, injected) = inject_retrieve_tool(&tools, true);
+        Ok(serde_json::json!([updated, injected]))
+    }
+}
+
+/// Real comparator for the `log_compressor` transform.
+///
+/// Two wrinkles beyond the usual adapter shape:
+///
+/// * **bias.** Python's signature is `compress(content, context="", bias=1.0)`
+///   and the recorder captured only `content`, so every fixture was produced at
+///   the default `bias = 1.0`. Rust takes `bias` positionally — pass 1.0.
+/// * **CCR store.** The Python compressor owns its store internally, while Rust
+///   mints a `cache_key` only when one is handed to `compress_with_store`.
+///   Without a store the CCR branch bails out with `"no store provided"` and
+///   `cache_key` comes back `None`, which would diff against any fixture that
+///   recorded a key. A throwaway `InMemoryCcrStore` is enough: the key is
+///   `md5(content)[:24]` on both sides and does not depend on the backend.
+pub struct LogCompressorComparator;
+
+impl TransformComparator for LogCompressorComparator {
+    fn name(&self) -> &str {
+        "log_compressor"
+    }
+
+    fn run(
+        &self,
+        input: &serde_json::Value,
+        config: &serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        use headroom_core::ccr::InMemoryCcrStore;
+        use headroom_core::transforms::{LogCompressor, LogCompressorConfig};
+
+        let content = input
+            .as_str()
+            .context("log_compressor fixture input must be a JSON string")?;
+
+        let usize_or = |key: &str, default: usize| -> usize {
+            config
+                .get(key)
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize)
+                .unwrap_or(default)
+        };
+        let bool_or = |key: &str, default: bool| -> bool {
+            config.get(key).and_then(|v| v.as_bool()).unwrap_or(default)
+        };
+
+        let cfg = LogCompressorConfig {
+            // The twelve fields the Python dataclass carries, all recorded.
+            max_errors: usize_or("max_errors", 10),
+            error_context_lines: usize_or("error_context_lines", 3),
+            keep_first_error: bool_or("keep_first_error", true),
+            keep_last_error: bool_or("keep_last_error", true),
+            max_stack_traces: usize_or("max_stack_traces", 3),
+            stack_trace_max_lines: usize_or("stack_trace_max_lines", 20),
+            max_warnings: usize_or("max_warnings", 5),
+            dedupe_warnings: bool_or("dedupe_warnings", true),
+            keep_summary_lines: bool_or("keep_summary_lines", true),
+            max_total_lines: usize_or("max_total_lines", 100),
+            enable_ccr: bool_or("enable_ccr", true),
+            min_lines_for_ccr: usize_or("min_lines_for_ccr", 50),
+
+            // Rust-only knobs, absent from the fixtures. Each falls back to the
+            // Rust default rather than to a Python-equivalent value, so the
+            // comparator exercises the code as it actually ships.
+            //
+            // Python applies the same 0.5 ratio gate inline.
+            min_compression_ratio_for_ccr: config
+                .get("min_compression_ratio_for_ccr")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.5),
+            // Rust's `true` collapses runtime frames where Python truncates the
+            // tail — a deliberate upgrade, and the one place these two
+            // implementations are known to disagree. Kept at the Rust default
+            // anyway: measured both ways, all 20 fixtures match either setting,
+            // because every recorded traceback is 3 lines and the collapse path
+            // only opens above `stack_trace_max_lines` (20). Leaving it `true`
+            // means a future fixture with a deep traceback will surface the
+            // divergence instead of having it configured away here.
+            collapse_runtime_frames: bool_or("collapse_runtime_frames", true),
+            trace_head_frames: usize_or("trace_head_frames", 3),
+            trace_app_frames: usize_or("trace_app_frames", 5),
+        };
+
+        let store = InMemoryCcrStore::new();
+        let (result, _sidecar) =
+            LogCompressor::new(cfg).compress_with_store(content, 1.0, Some(&store));
+
+        Ok(serde_json::json!({
+            "cache_key": result.cache_key,
+            "compressed": result.compressed,
+            "compressed_line_count": result.compressed_line_count,
+            "compression_ratio": result.compression_ratio,
+            "format_detected": result.format_detected.as_str(),
+            "original": result.original,
+            "original_line_count": result.original_line_count,
+            "stats": result.stats,
+        }))
+    }
+}
+
+/// Real comparator for the `diff_compressor` transform. Drives the Rust port
+/// over the recorded fixture inputs and emits the Python-shaped JSON output
+/// (subset: only fields the Python recorder serializes — i.e. fields, not
+/// `@property` derivatives like `compression_ratio`).
+pub struct DiffCompressorComparator;
+
+impl TransformComparator for DiffCompressorComparator {
+    fn name(&self) -> &str {
+        "diff_compressor"
+    }
+
+    fn run(
+        &self,
+        input: &serde_json::Value,
+        config: &serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        use headroom_core::transforms::{DiffCompressor, DiffCompressorConfig};
+
+        let content = input
+            .as_str()
+            .context("diff_compressor fixture input must be a JSON string")?;
+
+        // Build config from the fixture, falling back to defaults for any
+        // missing keys. The recorder writes every field today, but tolerating
+        // partial configs keeps fixtures forward-compatible if the Python
+        // dataclass picks up new fields.
+        let cfg = DiffCompressorConfig {
+            max_context_lines: config
+                .get("max_context_lines")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize)
+                .unwrap_or(2),
+            max_hunks_per_file: config
+                .get("max_hunks_per_file")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize)
+                .unwrap_or(10),
+            max_files: config
+                .get("max_files")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize)
+                .unwrap_or(20),
+            always_keep_additions: config
+                .get("always_keep_additions")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true),
+            always_keep_deletions: config
+                .get("always_keep_deletions")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true),
+            enable_ccr: config
+                .get("enable_ccr")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true),
+            min_lines_for_ccr: config
+                .get("min_lines_for_ccr")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize)
+                .unwrap_or(50),
+            // Rust-only knob; Python fixtures don't carry this field. The
+            // 0.8 default reproduces Python's hardcoded 20%-savings gate.
+            min_compression_ratio_for_ccr: config
+                .get("min_compression_ratio_for_ccr")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.8),
+        };
+
+        let compressor = DiffCompressor::new(cfg);
+        // No `context` field is recorded; default to empty string. Python's
+        // recorder calls `compress(content, "")` too, so this matches.
+        let result = compressor.compress(content, "");
+
+        Ok(serde_json::json!({
+            "additions": result.additions,
+            "cache_key": result.cache_key,
+            "compressed": result.compressed,
+            "compressed_line_count": result.compressed_line_count,
+            "deletions": result.deletions,
+            "files_affected": result.files_affected,
+            "hunks_kept": result.hunks_kept,
+            "hunks_removed": result.hunks_removed,
+            "original_line_count": result.original_line_count,
+        }))
+    }
+}
+
+/// Real comparator for the `tokenizer` transform. The recorder used
+/// `headroom.providers.openai.OpenAITokenCounter("gpt-4o-mini")`, so the
+/// fixture outputs are o200k_base BPE token counts. We rebuild the same
+/// encoding via `tiktoken-rs` and assert byte-equal counts.
+pub struct TokenizerComparator;
+
+impl TransformComparator for TokenizerComparator {
+    fn name(&self) -> &str {
+        "tokenizer"
+    }
+
+    fn run(
+        &self,
+        input: &serde_json::Value,
+        _config: &serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        use headroom_core::tokenizer::{TiktokenCounter, Tokenizer};
+        let text = input
+            .as_str()
+            .context("tokenizer fixture input must be a JSON string")?;
+        let counter = TiktokenCounter::for_model("gpt-4o-mini")
+            .context("init TiktokenCounter for gpt-4o-mini")?;
+        let count = counter.count_text(text);
+        Ok(serde_json::json!(count))
+    }
+}
+
+/// Real comparator for the `smart_crusher` transform. Drives the Rust
+/// port over the recorded fixture inputs (`{content, query, bias}`)
+/// and emits the same shape the Python recorder serialized:
+/// `{compressed, original, was_modified, strategy}`.
+///
+/// The comparator builds `SmartCrusherConfig` from the fixture's
+/// `config` block, falling back to the Rust default for any missing
+/// field. The Python recorder writes every field today, but tolerating
+/// partial configs keeps fixtures forward-compatible if either side
+/// gains a field.
+pub struct SmartCrusherComparator;
+
+impl TransformComparator for SmartCrusherComparator {
+    fn name(&self) -> &str {
+        "smart_crusher"
+    }
+
+    fn run(
+        &self,
+        input: &serde_json::Value,
+        config: &serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        use headroom_core::transforms::smart_crusher::{SmartCrusher, SmartCrusherConfig};
+
+        let content = input
+            .get("content")
+            .and_then(|v| v.as_str())
+            .context("smart_crusher fixture input.content must be a JSON string")?;
+        let query = input.get("query").and_then(|v| v.as_str()).unwrap_or("");
+        let bias = input.get("bias").and_then(|v| v.as_f64()).unwrap_or(1.0);
+
+        let defaults = SmartCrusherConfig::default();
+        let cfg = SmartCrusherConfig {
+            enabled: config
+                .get("enabled")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(defaults.enabled),
+            min_items_to_analyze: config
+                .get("min_items_to_analyze")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize)
+                .unwrap_or(defaults.min_items_to_analyze),
+            min_tokens_to_crush: config
+                .get("min_tokens_to_crush")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize)
+                .unwrap_or(defaults.min_tokens_to_crush),
+            variance_threshold: config
+                .get("variance_threshold")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(defaults.variance_threshold),
+            uniqueness_threshold: config
+                .get("uniqueness_threshold")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(defaults.uniqueness_threshold),
+            similarity_threshold: config
+                .get("similarity_threshold")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(defaults.similarity_threshold),
+            max_items_after_crush: config
+                .get("max_items_after_crush")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize)
+                .unwrap_or(defaults.max_items_after_crush),
+            preserve_change_points: config
+                .get("preserve_change_points")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(defaults.preserve_change_points),
+            factor_out_constants: config
+                .get("factor_out_constants")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(defaults.factor_out_constants),
+            include_summaries: config
+                .get("include_summaries")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(defaults.include_summaries),
+            use_feedback_hints: config
+                .get("use_feedback_hints")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(defaults.use_feedback_hints),
+            toin_confidence_threshold: config
+                .get("toin_confidence_threshold")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(defaults.toin_confidence_threshold),
+            dedup_identical_items: config
+                .get("dedup_identical_items")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(defaults.dedup_identical_items),
+            first_fraction: config
+                .get("first_fraction")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(defaults.first_fraction),
+            last_fraction: config
+                .get("last_fraction")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(defaults.last_fraction),
+            // Rust-only knob; Python config has no field for it. Use
+            // the Rust default (which mirrors Python's hardcoded
+            // RelevanceConfig.relevance_threshold = 0.3).
+            relevance_threshold: config
+                .get("relevance_threshold")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(defaults.relevance_threshold),
+            // Rust-only PR4 knob — fixtures don't carry this; use
+            // default. The parity harness exercises the legacy
+            // lossy-only path via `without_compaction`, so this
+            // threshold is moot.
+            lossless_min_savings_ratio: config
+                .get("lossless_min_savings_ratio")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(defaults.lossless_min_savings_ratio),
+            // Rust-only audit-fix knob — fixtures don't carry this; use
+            // default (true). Recorded fixtures predate the gate and
+            // their expected outputs assume markers fire as before.
+            enable_ccr_marker: config
+                .get("enable_ccr_marker")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(defaults.enable_ccr_marker),
+            // Compaction heuristics are moot here: this comparator uses
+            // `without_compaction` (fixtures were recorded against the
+            // lossy-only path). Take the defaults wholesale.
+            ..defaults
+        };
+
+        // Use without_compaction so the legacy fixtures (recorded
+        // against the pre-PR4 lossy-only path) keep matching byte-equal.
+        let crusher = SmartCrusher::without_compaction(cfg);
+        let result = crusher.crush(content, query, bias);
+
+        Ok(serde_json::json!({
+            "compressed": result.compressed,
+            "original": result.original,
+            "was_modified": result.was_modified,
+            "strategy": result.strategy,
+        }))
+    }
+}
+
+/// Real comparator for the `content_detector` transform. Drives the Rust
+/// port over the recorded fixture inputs (a single JSON string) and
+/// emits the same shape Python's recorder serializes for
+/// `DetectionResult`:
+///
+/// ```json
+/// {"content_type": "json_array", "confidence": 1.0, "metadata": {...}}
+/// ```
+///
+/// Python's recorder relies on `_json_default` to serialize the
+/// `DetectionResult` dataclass and the `ContentType` enum:
+/// - dataclass → `asdict(...)` produces `{content_type, confidence, metadata}`.
+/// - enum → its `.value` (the lowercase tag, e.g. "json_array").
+///
+/// Numeric fields in metadata are recorded as JSON numbers (Python ints
+/// stay ints), so we mirror that exactly with `serde_json::Number`.
+pub struct ContentDetectorComparator;
+
+impl TransformComparator for ContentDetectorComparator {
+    fn name(&self) -> &str {
+        "content_detector"
+    }
+
+    fn run(
+        &self,
+        input: &serde_json::Value,
+        _config: &serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        use headroom_core::transforms::detect_content_type;
+
+        let content = input
+            .as_str()
+            .context("content_detector fixture input must be a JSON string")?;
+        let result = detect_content_type(content);
+        Ok(serde_json::json!({
+            "content_type": result.content_type.as_str(),
+            "confidence": result.confidence,
+            "metadata": serde_json::Value::Object(result.metadata),
+        }))
+    }
+}
+
+/// Real comparator for the `text_crusher` transform. The fixture `input` is an
+/// object rather than a bare string, mirroring the recorder's three arguments
+/// (`tests/parity/record_text_crusher.py`), and `config` is always `null` — the
+/// recorder drove the Python default config, so the Rust side uses
+/// `TextCrusherConfig::default()` to match.
+pub struct TextCrusherComparator;
+
+impl TransformComparator for TextCrusherComparator {
+    fn name(&self) -> &str {
+        "text_crusher"
+    }
+
+    fn run(
+        &self,
+        input: &serde_json::Value,
+        _config: &serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        use headroom_core::transforms::{TextCrusher, TextCrusherConfig};
+
+        let content = input
+            .get("content")
+            .and_then(|v| v.as_str())
+            .context("text_crusher fixture input needs a string `content`")?;
+        let context = input
+            .get("context")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        // Null in the `short_passthrough` fixture, where the recorder passed no
+        // ratio at all — `Option<f64>` carries that through to the same default
+        // the Python call used.
+        let target_ratio = input.get("target_ratio").and_then(|v| v.as_f64());
+
+        let result =
+            TextCrusher::new(TextCrusherConfig::default()).compress(content, context, target_ratio);
+        Ok(serde_json::json!({
+            "compressed": result.compressed,
+            "original_tokens": result.original_tokens,
+            "compressed_tokens": result.compressed_tokens,
+            "compression_ratio": result.compression_ratio,
+            "kept_segments": result.kept_segments,
+            "total_segments": result.total_segments,
+        }))
+    }
+}
+
+/// Kompress comparator — runs the ML prose compressor against fixtures
+/// recorded from the Python reference.
+///
+/// Unlike the deterministic compressors, Kompress needs the
+/// `kompress-v2-base` ONNX model + ModernBERT tokenizer. The comparator
+/// resolves them **from the local HuggingFace cache only** (never the
+/// network) and lazily loads once. When the artifacts are absent — CI
+/// with no preloaded model — `run` returns `Err`, so the harness marks
+/// every kompress fixture `Skipped` rather than failing. Record + run
+/// locally (after `python scripts/record_fixtures.py`) for the real
+/// byte-parity assertion.
+///
+/// Fixtures are recorded with `enable_ccr=False` so the output is the
+/// pure joined kept-word stream (the Rust engine never emits the Python
+/// inline CCR marker; live-zone CCR uses the `<<ccr:>>` convention).
+pub struct KompressComparator {
+    model: std::sync::OnceLock<Result<headroom_core::transforms::kompress::Kompress, String>>,
+}
+
+impl Default for KompressComparator {
+    fn default() -> Self {
+        Self {
+            model: std::sync::OnceLock::new(),
+        }
+    }
+}
+
+impl KompressComparator {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn hf_cache_file(repo_dir: &str, rel: &[&str]) -> Option<PathBuf> {
+        let home = std::env::var("HOME").ok()?;
+        let snapshots = Path::new(&home)
+            .join(".cache/huggingface/hub")
+            .join(repo_dir)
+            .join("snapshots");
+        for snap in fs::read_dir(snapshots).ok()?.filter_map(|e| e.ok()) {
+            let mut cand = snap.path();
+            for part in rel {
+                cand = cand.join(part);
+            }
+            if cand.exists() {
+                return Some(cand);
+            }
+        }
+        None
+    }
+
+    /// Load the kompress model once, preserving the load error so the
+    /// harness's Skipped reason names the real cause (e.g. a missing ONNX
+    /// Runtime dylib — BASELINE.md Finding F1) instead of a generic cache
+    /// miss.
+    fn model(&self) -> &Result<headroom_core::transforms::kompress::Kompress, String> {
+        self.model.get_or_init(|| {
+            use headroom_core::transforms::kompress::{Kompress, KompressConfig};
+            let tok =
+                Self::hf_cache_file("models--answerdotai--ModernBERT-base", &["tokenizer.json"])
+                    .ok_or_else(|| {
+                        "kompress tokenizer.json not in local HF cache (fixture skipped)"
+                            .to_string()
+                    })?;
+            let onnx = Self::hf_cache_file(
+                "models--chopratejas--kompress-v2-base",
+                &["onnx", "kompress-int8-wo.onnx"],
+            )
+            .ok_or_else(|| {
+                "kompress kompress-int8-wo.onnx not in local HF cache (fixture skipped)".to_string()
+            })?;
+            Kompress::from_files(&tok, &onnx, KompressConfig::default()).map_err(|e| e.to_string())
+        })
+    }
+}
+
+impl TransformComparator for KompressComparator {
+    fn name(&self) -> &str {
+        "kompress"
+    }
+
+    fn run(
+        &self,
+        input: &serde_json::Value,
+        _config: &serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let content = input
+            .as_str()
+            .context("kompress fixture input must be a JSON string")?;
+        let model = self
+            .model()
+            .as_ref()
+            .map_err(|reason| anyhow::anyhow!("kompress unavailable: {reason}"))?;
+        let r = model.compress(content);
+        Ok(serde_json::json!({
+            "compressed": r.compressed,
+            "original": r.original,
+            "original_tokens": r.original_tokens,
+            "compressed_tokens": r.compressed_tokens,
+            "compression_ratio": r.compression_ratio,
+            // Engine never emits CCR markers; dispatcher owns CCR. Python
+            // fixtures are recorded with enable_ccr=False so cache_key is null.
+            "cache_key": serde_json::Value::Null,
+            "model_used": r.model_used,
+        }))
+    }
+}
+
+/// Real comparator for the `code_aware_compressor` transform. Drives the
+/// Rust AST code compressor over the recorded fixture inputs and emits the
+/// same shape Python's recorder serializes for `CodeCompressionResult`
+/// (dataclass fields via `asdict`; the `@property` derivatives are not
+/// serialized). Fixtures are recorded with `enable_ccr=False` and
+/// `fallback_to_kompress=False` so the output is deterministic and
+/// store/model-independent.
+///
+/// Grammar-version parity is the precondition: the Rust `tree-sitter-<lang>`
+/// crates are pinned to the exact versions of the Python wheels the fixtures
+/// were recorded against (see `headroom-core/Cargo.toml`).
+pub struct CodeCompressorComparator;
+
+impl TransformComparator for CodeCompressorComparator {
+    fn name(&self) -> &str {
+        "code_aware_compressor"
+    }
+
+    fn run(
+        &self,
+        input: &serde_json::Value,
+        config: &serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        use headroom_core::transforms::code_compressor::{
+            CodeAwareCompressor, CodeCompressorConfig, DocstringMode,
+        };
+
+        let content = input
+            .as_str()
+            .context("code_aware_compressor fixture input must be a JSON string")?;
+
+        let defaults = CodeCompressorConfig::default();
+        let cfg = CodeCompressorConfig {
+            preserve_imports: config
+                .get("preserve_imports")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(defaults.preserve_imports),
+            preserve_signatures: config
+                .get("preserve_signatures")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(defaults.preserve_signatures),
+            preserve_type_annotations: config
+                .get("preserve_type_annotations")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(defaults.preserve_type_annotations),
+            preserve_decorators: config
+                .get("preserve_decorators")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(defaults.preserve_decorators),
+            docstring_mode: config
+                .get("docstring_mode")
+                .and_then(|v| v.as_str())
+                .and_then(DocstringMode::from_value)
+                .unwrap_or(defaults.docstring_mode),
+            target_compression_rate: config
+                .get("target_compression_rate")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(defaults.target_compression_rate),
+            max_body_lines: config
+                .get("max_body_lines")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(defaults.max_body_lines),
+            compress_comments: config
+                .get("compress_comments")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(defaults.compress_comments),
+            min_tokens_for_compression: config
+                .get("min_tokens_for_compression")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(defaults.min_tokens_for_compression),
+            language_hint: config
+                .get("language_hint")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            fallback_to_kompress: config
+                .get("fallback_to_kompress")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(defaults.fallback_to_kompress),
+            semantic_analysis: config
+                .get("semantic_analysis")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(defaults.semantic_analysis),
+            enable_ccr: config
+                .get("enable_ccr")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(defaults.enable_ccr),
+            ccr_ttl: config
+                .get("ccr_ttl")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(defaults.ccr_ttl),
+        };
+
+        let compressor = CodeAwareCompressor::new(cfg);
+        let result = compressor.compress(content);
+
+        let mut symbol_scores = serde_json::Map::new();
+        for (name, score) in &result.symbol_scores {
+            symbol_scores.insert(name.clone(), serde_json::json!(score));
+        }
+
+        Ok(serde_json::json!({
+            "cache_key": result.cache_key,
+            "compressed": result.compressed,
+            "compressed_bodies": result.compressed_bodies,
+            "compressed_tokens": result.compressed_tokens,
+            "compression_ratio": result.compression_ratio,
+            "language": result.language.value(),
+            "language_confidence": result.language_confidence,
+            "original": result.original,
+            "original_tokens": result.original_tokens,
+            "preserved_imports": result.preserved_imports,
+            "preserved_signatures": result.preserved_signatures,
+            "symbol_scores": serde_json::Value::Object(symbol_scores),
+            "syntax_valid": result.syntax_valid,
+        }))
+    }
+}
+
+/// Every built-in comparator, in a stable order.
+pub fn builtin_comparators() -> Vec<Box<dyn TransformComparator>> {
+    vec![
+        Box::new(LogCompressorComparator),
+        Box::new(DiffCompressorComparator),
+        Box::new(CacheAlignerComparator),
+        Box::new(TokenizerComparator),
+        Box::new(CcrComparator),
+        Box::new(SmartCrusherComparator),
+        Box::new(ContentDetectorComparator),
+        Box::new(TextCrusherComparator),
+        Box::new(KompressComparator::new()),
+        Box::new(CodeCompressorComparator),
+    ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    /// A fake comparator that always returns "rust-output" regardless of
+    /// input. Paired with a fixture whose `output` is "python-output", this
+    /// proves the harness reports diffs correctly.
+    struct FakeDivergent;
+    impl TransformComparator for FakeDivergent {
+        fn name(&self) -> &str {
+            "fake_divergent"
+        }
+        fn run(
+            &self,
+            _input: &serde_json::Value,
+            _config: &serde_json::Value,
+        ) -> Result<serde_json::Value> {
+            Ok(serde_json::json!("rust-output"))
+        }
+    }
+
+    struct FakeAgreeing;
+    impl TransformComparator for FakeAgreeing {
+        fn name(&self) -> &str {
+            "fake_agreeing"
+        }
+        fn run(
+            &self,
+            _input: &serde_json::Value,
+            _config: &serde_json::Value,
+        ) -> Result<serde_json::Value> {
+            Ok(serde_json::json!("python-output"))
+        }
+    }
+
+    fn write_fixture(dir: &Path, transform: &str, name: &str, output: serde_json::Value) {
+        let sub = dir.join(transform);
+        fs::create_dir_all(&sub).unwrap();
+        let fixture = Fixture {
+            transform: transform.to_string(),
+            input: serde_json::json!("hello"),
+            config: serde_json::json!({}),
+            output,
+            recorded_at: "2026-04-23T00:00:00Z".to_string(),
+            input_sha256: "deadbeef".to_string(),
+        };
+        let mut f = fs::File::create(sub.join(format!("{name}.json"))).unwrap();
+        f.write_all(&serde_json::to_vec_pretty(&fixture).unwrap())
+            .unwrap();
+    }
+
+    #[test]
+    fn harness_reports_diff_for_divergent_comparator() {
+        let tmp = tempdir();
+        write_fixture(
+            tmp.path(),
+            "fake_divergent",
+            "case1",
+            serde_json::json!("python-output"),
+        );
+        let report = run_comparator(tmp.path(), &FakeDivergent).unwrap();
+        assert_eq!(report.total(), 1);
+        assert_eq!(report.matched, 0);
+        assert_eq!(report.diffed.len(), 1);
+        assert!(!report.is_clean());
+        let (_, expected, actual) = &report.diffed[0];
+        assert!(expected.contains("python-output"));
+        assert!(actual.contains("rust-output"));
+    }
+
+    #[test]
+    fn harness_reports_match_for_agreeing_comparator() {
+        let tmp = tempdir();
+        write_fixture(
+            tmp.path(),
+            "fake_agreeing",
+            "case1",
+            serde_json::json!("python-output"),
+        );
+        let report = run_comparator(tmp.path(), &FakeAgreeing).unwrap();
+        assert_eq!(report.matched, 1);
+        assert!(report.is_clean());
+    }
+
+    #[test]
+    fn ccr_comparator_matches_recorded_fixture() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/parity/fixtures");
+        let report = run_comparator(&dir, &CcrComparator).unwrap();
+        assert_eq!(
+            report.matched,
+            report.total(),
+            "all ccr fixtures must match, got {report:?}"
+        );
+        assert!(
+            report.skipped.is_empty(),
+            "ccr fixtures must not skip: {report:?}"
+        );
+        assert!(
+            report.diffed.is_empty(),
+            "ccr fixtures must not diff: {report:?}"
+        );
+        assert!(report.total() > 0, "expected ccr fixtures on disk");
+    }
+
+    #[test]
+    fn missing_transform_dir_yields_empty_report() {
+        let tmp = tempdir();
+        let report = run_comparator(tmp.path(), &FakeAgreeing).unwrap();
+        assert_eq!(report.total(), 0);
+    }
+
+    /// A comparator that always errors — proves the harness turns
+    /// comparator errors into `Skipped` rather than panicking.
+    struct AlwaysErr;
+    impl TransformComparator for AlwaysErr {
+        fn name(&self) -> &str {
+            "always_err"
+        }
+        fn run(
+            &self,
+            _input: &serde_json::Value,
+            _config: &serde_json::Value,
+        ) -> Result<serde_json::Value> {
+            anyhow::bail!("comparator error")
+        }
+    }
+
+    #[test]
+    fn comparator_errors_report_skipped() {
+        let tmp = tempdir();
+        write_fixture(
+            tmp.path(),
+            "always_err",
+            "case1",
+            serde_json::json!({"compressed": "x"}),
+        );
+        let report = run_comparator(tmp.path(), &AlwaysErr).unwrap();
+        assert_eq!(report.skipped.len(), 1);
+        assert_eq!(report.matched, 0);
+    }
+
+    #[test]
+    fn kompress_comparator_fails_loud_when_dylib_missing() {
+        // Guard: only run where the model is cached (CI has no model → skip,
+        // matching `tests/kompress_parity.rs`). The failure mode we are
+        // guarding: model cached + ONNX Runtime dylib missing → the
+        // comparator must surface the dylib error (BASELINE.md F1), not
+        // hang and not misreport as "not in cache".
+        let has_tokenizer = KompressComparator::hf_cache_file(
+            "models--answerdotai--ModernBERT-base",
+            &["tokenizer.json"],
+        )
+        .is_some();
+        let has_onnx = KompressComparator::hf_cache_file(
+            "models--chopratejas--kompress-v2-base",
+            &["onnx", "kompress-int8-wo.onnx"],
+        )
+        .is_some();
+        if !(has_tokenizer && has_onnx) {
+            eprintln!("SKIP: kompress model/tokenizer not in HF cache");
+            return;
+        }
+
+        // Fresh test-binary process → the ort loader guard has not run yet,
+        // so a bogus path is honored and the guard fails loudly before any
+        // ort API is touched.
+        std::env::set_var("ORT_DYLIB_PATH", "/nonexistent/onnxruntime.dylib");
+
+        let comp = KompressComparator::new();
+        let err = comp
+            .run(
+                &serde_json::json!("some sufficiently long input text to compress"),
+                &serde_json::json!({}),
+            )
+            .unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("ORT_DYLIB_PATH") || msg.contains("ONNX Runtime"),
+            "expected a loud dylib error, got: {msg}"
+        );
+        // The hint must be actionable: name `set ORT_DYLIB_PATH` (or
+        // `pip install onnxruntime`) so a dev with the cached model knows
+        // how to unblock kompress.
+        assert!(
+            msg.contains("set ORT_DYLIB_PATH")
+                && (msg.contains("pip install onnxruntime") || msg.contains("onnxruntime")),
+            "expected an actionable hint naming 'set ORT_DYLIB_PATH', got: {msg}"
+        );
+    }
+
+    #[test]
+    fn cache_aligner_comparator_matches_recorded_fixture() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/parity/fixtures");
+        let report = run_comparator(&dir, &CacheAlignerComparator).unwrap();
+        assert_eq!(
+            report.matched,
+            report.total(),
+            "all cache_aligner fixtures must match, got {report:?}"
+        );
+        assert!(
+            report.skipped.is_empty(),
+            "cache_aligner fixtures must not skip: {report:?}"
+        );
+        assert!(
+            report.diffed.is_empty(),
+            "cache_aligner fixtures must not diff: {report:?}"
+        );
+        assert!(
+            report.total() > 0,
+            "expected cache_aligner fixtures on disk"
+        );
+    }
+
+    /// Minimal tempdir helper to avoid a dev-dependency on `tempfile`.
+    struct TempDir(PathBuf);
+    impl TempDir {
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    fn tempdir() -> TempDir {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let p = std::env::temp_dir().join(format!(
+            "headroom-version-parity-{nanos}-{:?}",
+            std::thread::current().id()
+        ));
+        fs::create_dir_all(&p).unwrap();
+        TempDir(p)
+    }
+}

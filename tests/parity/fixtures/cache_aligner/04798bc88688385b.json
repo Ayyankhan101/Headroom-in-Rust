@@ -1,0 +1,64 @@
+{
+  "config": {
+    "collapse_blank_lines": true,
+    "date_patterns": [
+      "Current [Dd]ate:?\\s*\\d{4}-\\d{2}-\\d{2}",
+      "Today is \\w+,?\\s+\\w+ \\d+",
+      "Today's date:?\\s*\\d{4}-\\d{2}-\\d{2}",
+      "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}"
+    ],
+    "detection_tiers": [
+      "regex"
+    ],
+    "dynamic_tail_separator": "\n\n---\n[Dynamic Context]\n",
+    "enabled": false,
+    "entropy_threshold": 0.7,
+    "extra_dynamic_labels": [],
+    "normalize_whitespace": true,
+    "use_dynamic_detector": true
+  },
+  "input": [
+    {
+      "content": "You are a helpful assistant. Request id 12. UUID 123e4567-e89b-12d3-a456-426614174000.",
+      "role": "system"
+    },
+    {
+      "content": "Control message one.",
+      "role": "user"
+    }
+  ],
+  "input_sha256": "04798bc88688385bf5b57260b3d1ecf73ae0036c8e0d71b9236ec6e50c8b32f6",
+  "output": {
+    "cache_metrics": {
+      "prefix_changed": false,
+      "previous_hash": null,
+      "stable_prefix_bytes": 86,
+      "stable_prefix_hash": "b65b3800c9bd25a0",
+      "stable_prefix_tokens_est": 32
+    },
+    "diff_artifact": null,
+    "markers_inserted": [
+      "stable_prefix_hash:b65b3800c9bd25a0"
+    ],
+    "messages": [
+      {
+        "content": "You are a helpful assistant. Request id 12. UUID 123e4567-e89b-12d3-a456-426614174000.",
+        "role": "system"
+      },
+      {
+        "content": "Control message one.",
+        "role": "user"
+      }
+    ],
+    "timing": {},
+    "tokens_after": 47,
+    "tokens_before": 47,
+    "transforms_applied": [],
+    "warnings": [
+      "CacheAligner: detected volatile content in system prompt (uuid=1); cache prefix unstable. Move dynamic values out of the system prompt to recover cache hits."
+    ],
+    "waste_signals": null
+  },
+  "recorded_at": "2026-08-17T08:53:46.163264+00:00",
+  "transform": "cache_aligner"
+}

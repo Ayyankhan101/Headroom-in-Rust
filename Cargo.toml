@@ -5,7 +5,7 @@ members = [
     "crates/headroom-proxy",
     "crates/headroom-simulators",
     "crates/headroom-py",
-    "crates/headroom-parity",
+    "crates/headroom-version-parity",
 ]
 # headroom-py is a Python extension module — it must be built via maturin, not
 # plain cargo (the "extension-module" feature tells pyo3 not to link libpython,
@@ -16,7 +16,7 @@ default-members = [
     "crates/headroom-core",
     "crates/headroom-proxy",
     "crates/headroom-simulators",
-    "crates/headroom-parity",
+    "crates/headroom-version-parity",
 ]
 
 [workspace.package]
@@ -58,7 +58,7 @@ tracing = { version = "0.1", features = ["log"] }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
-axum = "0.7"
+axum = "0.8"
 tower = "0.5"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 pyo3 = { version = "0.29", features = ["abi3-py310"] }

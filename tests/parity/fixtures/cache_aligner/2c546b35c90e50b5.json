@@ -1,0 +1,64 @@
+{
+  "config": {
+    "collapse_blank_lines": true,
+    "date_patterns": [
+      "Current [Dd]ate:?\\s*\\d{4}-\\d{2}-\\d{2}",
+      "Today is \\w+,?\\s+\\w+ \\d+",
+      "Today's date:?\\s*\\d{4}-\\d{2}-\\d{2}",
+      "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}"
+    ],
+    "detection_tiers": [
+      "regex"
+    ],
+    "dynamic_tail_separator": "\n\n---\n[Dynamic Context]\n",
+    "enabled": false,
+    "entropy_threshold": 0.7,
+    "extra_dynamic_labels": [],
+    "normalize_whitespace": true,
+    "use_dynamic_detector": true
+  },
+  "input": [
+    {
+      "content": "Build hash 550e8400e29b41d4a716446655440000 is the deployment marker.",
+      "role": "system"
+    },
+    {
+      "content": "Control message four.",
+      "role": "user"
+    }
+  ],
+  "input_sha256": "2c546b35c90e50b5a3b49f12b8b151b3107fcdcccefc593dbc5607c9907bee1a",
+  "output": {
+    "cache_metrics": {
+      "prefix_changed": false,
+      "previous_hash": null,
+      "stable_prefix_bytes": 69,
+      "stable_prefix_hash": "7bf643acbbe4d643",
+      "stable_prefix_tokens_est": 24
+    },
+    "diff_artifact": null,
+    "markers_inserted": [
+      "stable_prefix_hash:7bf643acbbe4d643"
+    ],
+    "messages": [
+      {
+        "content": "Build hash 550e8400e29b41d4a716446655440000 is the deployment marker.",
+        "role": "system"
+      },
+      {
+        "content": "Control message four.",
+        "role": "user"
+      }
+    ],
+    "timing": {},
+    "tokens_after": 39,
+    "tokens_before": 39,
+    "transforms_applied": [],
+    "warnings": [
+      "CacheAligner: detected volatile content in system prompt (hex_hash=1); cache prefix unstable. Move dynamic values out of the system prompt to recover cache hits."
+    ],
+    "waste_signals": null
+  },
+  "recorded_at": "2026-08-17T08:53:46.164256+00:00",
+  "transform": "cache_aligner"
+}

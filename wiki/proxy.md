@@ -323,13 +323,18 @@ The provider caches the bytes you *forwarded*, which compression already changed
 
 ```python
 forwarded = []
+
+
 def next_turn(new_messages):
-    r = requests.post(f"{proxy}/v1/compress", json={
-        "messages": forwarded + new_messages,
-        "model": "claude-sonnet-4-6",
-        "config": {"frozen_message_count": len(forwarded)},
-    }).json()
-    forwarded[:] = r["messages"]   # next turn's frozen prefix
+    r = requests.post(
+        f"{proxy}/v1/compress",
+        json={
+            "messages": forwarded + new_messages,
+            "model": "claude-sonnet-4-6",
+            "config": {"frozen_message_count": len(forwarded)},
+        },
+    ).json()
+    forwarded[:] = r["messages"]  # next turn's frozen prefix
     return forwarded
 ```
 
@@ -428,14 +433,10 @@ headroom proxy
 For production deployments:
 
 ```bash
-# Use a process manager
-pip install gunicorn
-
-# Run with gunicorn
-gunicorn headroom.proxy.server:app \
-  --workers 4 \
-  --bind 0.0.0.0:8787 \
-  --worker-class uvicorn.workers.UvicornWorker
+# headroom proxy starts the Rust headroom-proxy binary
+headroom proxy --host 0.0.0.0 --port 8787
+# ...or run the binary directly
+headroom-proxy --listen 0.0.0.0:8787 --upstream https://api.anthropic.com
 ```
 
 Or with Docker:

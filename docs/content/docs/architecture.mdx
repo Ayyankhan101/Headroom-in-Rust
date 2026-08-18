@@ -15,7 +15,7 @@ Headroom sits between your application and the LLM provider. It intercepts the r
                                v
 +---------------------------------------------------------------+
 |                           HEADROOM                            |
-|    Proxy (FastAPI)   ·   Python compress()   ·   TS compress() |
+|    Proxy (Rust)   ·   Python compress()   ·   TS compress()         |
 |                               |                               |
 |                               v                               |
 |        Transform pipeline  ──▶  ContentRouter                 |
@@ -41,7 +41,7 @@ Headroom can be used three ways, all feeding the same compression pipeline:
 | **SDK mode** | Call `compress()` (Python or TypeScript) on your messages before you send them | Minimal — one function call |
 | **Integrations** | LangChain, Vercel AI SDK, Agno, Strands, LiteLLM, MCP adapters | Framework-specific setup |
 
-In proxy mode the server is a FastAPI app with per-provider handlers (Anthropic, OpenAI, Gemini, Bedrock) that each run the same compression pipeline before forwarding through the selected [backend](/docs/proxy#cloud-providers).
+In proxy mode the server is a Rust binary (`headroom-proxy`) with per-provider handlers (Anthropic, OpenAI, Gemini, Bedrock) that each run the same compression pipeline before forwarding through the selected [backend](/docs/proxy#cloud-providers).
 
 ## The compression pipeline
 

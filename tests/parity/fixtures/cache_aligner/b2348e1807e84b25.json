@@ -1,0 +1,62 @@
+{
+  "config": {
+    "collapse_blank_lines": true,
+    "date_patterns": [
+      "Current [Dd]ate:?\\s*\\d{4}-\\d{2}-\\d{2}",
+      "Today is \\w+,?\\s+\\w+ \\d+",
+      "Today's date:?\\s*\\d{4}-\\d{2}-\\d{2}",
+      "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}"
+    ],
+    "detection_tiers": [
+      "regex"
+    ],
+    "dynamic_tail_separator": "\n\n---\n[Dynamic Context]\n",
+    "enabled": false,
+    "entropy_threshold": 0.7,
+    "extra_dynamic_labels": [],
+    "normalize_whitespace": true,
+    "use_dynamic_detector": true
+  },
+  "input": [
+    {
+      "content": "Stable system prompt, no volatile content at all.",
+      "role": "system"
+    },
+    {
+      "content": "Control message five.",
+      "role": "user"
+    }
+  ],
+  "input_sha256": "b2348e1807e84b25cee038c74277572cfa81a7cb829e2542b25f518cfb5c1832",
+  "output": {
+    "cache_metrics": {
+      "prefix_changed": false,
+      "previous_hash": null,
+      "stable_prefix_bytes": 49,
+      "stable_prefix_hash": "cf377db0fdf5ea59",
+      "stable_prefix_tokens_est": 10
+    },
+    "diff_artifact": null,
+    "markers_inserted": [
+      "stable_prefix_hash:cf377db0fdf5ea59"
+    ],
+    "messages": [
+      {
+        "content": "Stable system prompt, no volatile content at all.",
+        "role": "system"
+      },
+      {
+        "content": "Control message five.",
+        "role": "user"
+      }
+    ],
+    "timing": {},
+    "tokens_after": 25,
+    "tokens_before": 25,
+    "transforms_applied": [],
+    "warnings": [],
+    "waste_signals": null
+  },
+  "recorded_at": "2026-08-17T08:53:46.164525+00:00",
+  "transform": "cache_aligner"
+}
