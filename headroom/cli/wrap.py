@@ -4699,9 +4699,9 @@ def wrap_selfheal(marker: str | None) -> None:
 @click.option(
     "--backend",
     default=None,
-    help="API backend for the proxy: 'anthropic' (default), 'litellm-vertex_ai', etc. "
+    help="API backend for the proxy: 'anthropic' (default), 'anyllm', etc. "
     "(env: HEADROOM_BACKEND). For Vertex, prefer CLAUDE_CODE_USE_VERTEX=1 (native, "
-    "keeps your GCP auth) over a litellm backend.",
+    "keeps your GCP auth).",
 )
 @click.option(
     "--region",
@@ -5228,7 +5228,7 @@ def _require_copilot_subscription_resolution() -> CopilotSubscriptionTokenResolu
 @click.option(
     "--backend",
     default=None,
-    help="API backend for the proxy: 'anthropic', 'anyllm', 'litellm-vertex', etc. (env: HEADROOM_BACKEND)",
+    help="API backend for the proxy: 'anthropic', 'anyllm', etc. (env: HEADROOM_BACKEND)",
 )
 @click.option(
     "--anyllm-provider",
@@ -5321,7 +5321,7 @@ def copilot(
         if effective_backend not in (None, "", "anthropic"):
             raise click.ClickException(
                 "--subscription routes to GitHub Copilot's hosted API and cannot be combined "
-                "with translated backends such as anyllm or litellm-*."
+                "with translated backends such as anyllm."
             )
         if provider_type == "anthropic":
             raise click.ClickException(
@@ -5920,7 +5920,7 @@ def _run_codex_wrap(
 @click.option(
     "--backend",
     default=None,
-    help="API backend for the proxy: 'anthropic', 'anyllm', 'litellm-vertex', etc. (env: HEADROOM_BACKEND)",
+    help="API backend for the proxy: 'anthropic', 'anyllm', etc. (env: HEADROOM_BACKEND)",
 )
 @click.option(
     "--anyllm-provider",
@@ -6005,7 +6005,7 @@ def codex(
 @click.option("--learn", is_flag=True, help="Enable live traffic learning")
 @click.option("--memory", is_flag=True, help="Enable persistent cross-session memory")
 @click.option(
-    "--backend", default=None, help="API backend: 'anthropic', 'anyllm', 'litellm-vertex', etc."
+    "--backend", default=None, help="API backend: 'anthropic', 'anyllm', etc."
 )
 @click.option("--anyllm-provider", default=None, help="Provider for any-llm backend")
 @click.option("--region", default=None, help="Cloud region for Bedrock/Vertex")
@@ -6035,7 +6035,7 @@ def aider(
         headroom wrap aider                              # Start proxy + aider
         headroom wrap aider -- --model gpt-4o            # Use GPT-4o
         headroom wrap aider -- --model claude-sonnet-4   # Use Claude
-        headroom wrap aider --backend litellm-vertex --region us-central1
+        headroom wrap aider --backend anyllm --anyllm-provider groq
     """
     if prepare_only:
         return
@@ -6085,7 +6085,7 @@ def aider(
 @click.option("--learn", is_flag=True, help="Enable live traffic learning")
 @click.option("--memory", is_flag=True, help="Enable persistent cross-session memory")
 @click.option(
-    "--backend", default=None, help="API backend: 'anthropic', 'anyllm', 'litellm-vertex', etc."
+    "--backend", default=None, help="API backend: 'anthropic', 'anyllm', etc."
 )
 @click.option("--anyllm-provider", default=None, help="Provider for any-llm backend")
 @click.option("--region", default=None, help="Cloud region for Bedrock/Vertex")
@@ -6341,7 +6341,7 @@ def kimi(
 @click.option(
     "--backend",
     default=None,
-    help="API backend for the proxy: 'anthropic' (default), 'litellm-xai', etc.",
+    help="API backend for the proxy: 'anthropic' (default), 'anyllm', etc.",
 )
 @click.option("--anyllm-provider", default=None, help="Provider for any-llm backend")
 @click.option("--region", default=None, help="Cloud region for Vertex/Bedrock backends")
@@ -6788,7 +6788,7 @@ def continue_dev(
 @click.option("--learn", is_flag=True, help="Enable live traffic learning")
 @click.option("--memory", is_flag=True, help="Enable persistent cross-session memory")
 @click.option(
-    "--backend", default=None, help="API backend: 'anthropic', 'anyllm', 'litellm-vertex', etc."
+    "--backend", default=None, help="API backend: 'anthropic', 'anyllm', etc."
 )
 @click.option("--anyllm-provider", default=None, help="Provider for any-llm backend")
 @click.option("--region", default=None, help="Cloud region for Bedrock/Vertex")
@@ -6882,7 +6882,7 @@ def goose(
 @click.option("--learn", is_flag=True, help="Enable live traffic learning")
 @click.option("--memory", is_flag=True, help="Enable persistent cross-session memory")
 @click.option(
-    "--backend", default=None, help="API backend: 'anthropic', 'anyllm', 'litellm-vertex', etc."
+    "--backend", default=None, help="API backend: 'anthropic', 'anyllm', etc."
 )
 @click.option("--anyllm-provider", default=None, help="Provider for any-llm backend")
 @click.option("--region", default=None, help="Cloud region for Bedrock/Vertex")
@@ -7222,7 +7222,7 @@ def openclaw(
 @click.option("--learn", is_flag=True, help="Enable live traffic learning")
 @click.option("--memory", is_flag=True, help="Enable persistent cross-session memory")
 @click.option(
-    "--backend", default=None, help="API backend: 'anthropic', 'anyllm', 'litellm-vertex', etc."
+    "--backend", default=None, help="API backend: 'anthropic', 'anyllm', etc."
 )
 @click.option("--anyllm-provider", default=None, help="Provider for any-llm backend")
 @click.option("--region", default=None, help="Cloud region for Bedrock/Vertex")
@@ -7268,7 +7268,7 @@ def opencode(
         if effective_backend not in (None, "", "anthropic"):
             raise click.ClickException(
                 "--copilot-subscription cannot be combined with translated backends "
-                "such as anyllm or litellm-*; use the anthropic backend."
+                "such as anyllm; use the anthropic backend."
             )
         if no_proxy:
             raise click.ClickException(
