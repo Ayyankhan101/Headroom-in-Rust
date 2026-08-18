@@ -23,7 +23,7 @@ Headroom is an LLM context-optimization proxy. The codebase is mid-migration fro
 - **`crates/headroom-core`** — shared types + transform surface: SmartCrusher, Diff/Log/Code/Kompress (with `onnx_cpu.rs`) /TextCrusher compressors, tokenizer, CCR with persistent backends (in-memory / sqlite / redis), `signals/` trait module, `auth_mode`, `rollout`, `cache_control`, `compression_policy`.
 - **`crates/headroom-proxy`** — the request-path proxy: Anthropic/OpenAI/Responses/streaming handlers, byte-faithful SSE parser, WebSocket, native Bedrock (SigV4) and Vertex (ADC) routes, cache stabilization, Prometheus/OTel observability, `responses_items.rs`.
 - **`crates/headroom-py`** — PyO3 cdylib exposing `headroom._core`; Python transform modules (e.g. `smart_crusher.py`) are thin shims that delegate to Rust.
-- **`crates/headroom-parity`** — Rust-vs-Python oracle harness with 11 fixture sets; 8 comparators real, 2 stubs (`cache_aligner`, `ccr`), 1 set (`codex_openai_contracts`) reviewed.
+- **`crates/headroom-version-parity`** — Rust-vs-Rust version-parity harness with 11 fixture sets; 10 real comparators (all promoted); 1 set (`codex_openai_contracts`) reviewed. Renamed from `headroom-parity` per Q12.
 - **`crates/headroom-simulators`** — offline upstream simulators for tests.
 
 The REALIGNMENT plan (phases A–G, drafted 2026-05-01) is largely implemented: upstream branches `realign-C1`…`realign-G3`, `realign-I6`, `realign-phase-AB` exist; the Rust proxy now has native Bedrock/Vertex, SSE, WebSocket, and cache-stabilization code in-tree.
@@ -85,7 +85,7 @@ Off-path (Python survives):
 
 **Deleted from the repo** (once parity is proven): `headroom/proxy/*` (server, handlers, interceptors, policies, cost, rate limiter, request logger, prometheus metrics), request-path `headroom/transforms/*` Python, `headroom/backends/litellm.py`, `semantic_cache.py`, memory request-path modules, ~150 proxy-only test files, proxy-only runtime deps (`fastapi`, `uvicorn`, etc. — kept in dev/test deps for the parity harness).
 
-**Parity harness fate (decision Q12, pending greenlight):** repurposed, not deleted — `headroom-parity` becomes a Rust-vs-Rust version-parity harness over the recorded fixtures, guarding future ML compressor changes (e.g. a Kompress port).
+**Parity harness fate (decision Q12, greenlit):** repurposed, not deleted — `headroom-version-parity` is a Rust-vs-Rust version-parity harness over the recorded fixtures, guarding future ML compressor changes (e.g. a Kompress port).
 
 ---
 

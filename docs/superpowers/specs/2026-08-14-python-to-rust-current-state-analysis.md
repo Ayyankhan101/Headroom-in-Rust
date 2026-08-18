@@ -42,7 +42,7 @@ the implementation plan uses measured numbers only.
 | `headroom-core` | Shared types + transform surface: SmartCrusher, Diff/Log/Code/Kompress (`onnx_cpu.rs`)/TextCrusher compressors, tokenizer, CCR with persistent backends (in-memory / sqlite / redis), `signals/` trait module, `auth_mode`, `rollout`, `cache_control`, `compression_policy` |
 | `headroom-proxy` | The request-path proxy: Anthropic/OpenAI/Responses/streaming handlers, byte-faithful SSE parser, WebSocket, native Bedrock (SigV4) and Vertex (ADC) routes, cache stabilization (volatile detector, drift telemetry, tool-def normalization), Prometheus/OTel observability, `responses_items.rs` |
 | `headroom-py` | PyO3 cdylib exposing `headroom._core`; Python transform modules (e.g. `smart_crusher.py`) are thin shims that delegate to Rust |
-| `headroom-parity` | Rust-vs-Python oracle harness (11 fixture sets, 228 recorded JSON fixtures) |
+| `headroom-version-parity` | Rust-vs-Rust version-parity harness (11 fixture sets, 218 recorded JSON fixtures; renamed from `headroom-parity` per Q12) |
 | `headroom-simulators` | Offline upstream simulators for tests |
 
 ### 1.3 Parity harness state
@@ -140,4 +140,4 @@ executed.
 - Design doc: `docs/superpowers/specs/2026-08-14-finish-python-to-rust-conversion-design.md`
 - Implementation plan: `docs/superpowers/plans/2026-08-14-finish-python-to-rust-conversion.md`
 - REALIGNMENT index: `REALIGNMENT/INDEX.md` (phases A–G done; Phase H superseded by the plan's Phase 3)
-- Operator migration guide (preview): `docs/operations/python-to-rust-migration.md`
+- Operator migration guide: `docs/operations/python-to-rust-migration.md`
