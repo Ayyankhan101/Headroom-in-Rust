@@ -38,12 +38,17 @@
 //! `crates/headroom-core/tests/live_zone_dispatch.rs` pins the
 //! SHA-256 prefix-and-suffix invariant in CI.
 
+use std::sync::OnceLock;
+
 use bytes::Bytes;
 use headroom_core::auth_mode::AuthMode as RequestAuthMode;
 use headroom_core::transforms::live_zone::DEFAULT_MODEL;
 use headroom_core::transforms::{
-    compress_anthropic_live_zone, BlockAction, ExclusionReason, LiveZoneError, LiveZoneOutcome,
+    compress_anthropic_live_zone_with_compressor, BlockAction, BlockThresholds,
+    ExclusionReason, LiveZoneError, LiveZoneOutcome,
 };
+use headroom_core::transforms::pipeline::block_compressor::PipelineBlockCompressor;
+use headroom_core::transforms::pipeline::config::PipelineConfig;
 use serde_json::Value;
 
 use crate::cache_stabilization::anthropic_cache_control::{
@@ -146,6 +151,27 @@ pub enum PassthroughReason {
 ///   upstream. The live-zone dispatcher itself still runs on every
 ///   mode in PR-B/C; the auth-mode gate is local to Phase E.
 /// - `request_id`: per-request id used for log correlation.
+///
+/// Pipeline-backed block compressor, created once per process.
+fn block_compressor() -> &'static PipelineBlockCompressor {
+    static INSTANCE: OnceLock<PipelineBlockCompressor> = OnceLock::new();
+    INSTANCE.get_or_init(|| {
+        let config = PipelineConfig::default();
+        PipelineBlockCompressor::from_config(&config)
+    })
+}
+
+/// Block thresholds from pipeline config, created once per process.
+fn block_thresholds() -> &'static BlockThresholds {
+    static INSTANCE: OnceLock<BlockThresholds> = OnceLock::new();
+    INSTANCE.get_or_init(|| {
+        let config = PipelineConfig::default();
+        config.block_thresholds
+    })
+}
+
+/// Uses the pipeline-backed [`BlockCompressor`] for block-level
+/// dispatch instead of the hardcoded dispatch table.
 pub fn compress_anthropic_request(
     body: &Bytes,
     mode: CompressionMode,
@@ -355,7 +381,15 @@ pub fn compress_anthropic_request(
     // getting compression, not losing it). The plumbing here lets
     // F2.2 vary per-block thresholds by mode without touching this
     // call site again.
-    match compress_anthropic_live_zone(&dispatch_body, frozen_count, auth_mode.into(), model) {
+    match compress_anthropic_live_zone_with_compressor(
+        &dispatch_body,
+        frozen_count,
+        auth_mode.into(),
+        model,
+        None, // CCR store — wired in PR-B7; currently no-op path
+        block_compressor(),
+        block_thresholds(),
+    ) {
         Ok(LiveZoneOutcome::NoChange { manifest }) => {
             let block_count = manifest.block_outcomes.len();
             let blocks_excluded = manifest
