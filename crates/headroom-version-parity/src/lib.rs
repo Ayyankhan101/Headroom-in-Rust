@@ -1,15 +1,21 @@
-//! Parity harness: load JSON fixtures recorded from the Python implementation,
-//! run the Rust port, and compare outputs.
+//! Version-parity harness: the recorded fixtures under `tests/parity/fixtures/`
+//! freeze each transform's accepted output (originally produced by the Python
+//! implementation, now retired from the request path). Every comparator runs
+//! the *current* Rust implementation against that recorded *previous* output,
+//! so a future compressor change (e.g. a Kompress variant) that drifts from
+//! the frozen behavior is caught as a `Diff` on the next `make test-parity`.
 //!
-//! All eight comparators are real. The parity gate's exit criterion is
-//! zero `Skipped` on request-path transforms.
+//! All ten comparators are real. The gate's exit criterion is zero `Skipped`
+//! on request-path transforms.
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Recorded fixture schema. Matches `tests/parity/recorder.py`.
+/// Recorded fixture schema. Matches `tests/parity/recorder.py`. `output` is
+/// the frozen *previous-version* result the current Rust implementation must
+/// reproduce byte-for-byte.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Fixture {
     pub transform: String,
@@ -23,11 +29,12 @@ pub struct Fixture {
     pub input_sha256: String,
 }
 
-/// Outcome of comparing a recorded fixture against the current Rust impl.
+/// Outcome of comparing a recorded (previous-version) fixture output against
+/// the current Rust implementation.
 #[derive(Debug, Clone)]
 pub enum ComparisonOutcome {
     Match,
-    Diff { expected: String, actual: String },
+    Diff { previous: String, current: String },
     Skipped { reason: String },
 }
 
@@ -43,7 +50,8 @@ pub trait TransformComparator {
     ) -> Result<serde_json::Value>;
 }
 
-/// Compare a single fixture against a comparator and return an outcome.
+/// Compare a recorded fixture (its `output` = previous-version result) against
+/// the current Rust comparator output and return an outcome.
 ///
 /// f64 normalization: `serde_json` (without the `arbitrary_precision`
 /// feature) has an asymmetry — values constructed via `json!(f64)` keep
@@ -57,7 +65,7 @@ pub fn compare_fixture(
     comparator: &dyn TransformComparator,
     fixture: &Fixture,
 ) -> Result<ComparisonOutcome> {
-    let actual = match comparator.run(&fixture.input, &fixture.config) {
+    let current = match comparator.run(&fixture.input, &fixture.config) {
         Ok(v) => v,
         Err(e) => {
             return Ok(ComparisonOutcome::Skipped {
@@ -65,15 +73,15 @@ pub fn compare_fixture(
             })
         }
     };
-    let actual_normalized: serde_json::Value =
-        serde_json::from_str(&serde_json::to_string(&actual)?)
+    let current_normalized: serde_json::Value =
+        serde_json::from_str(&serde_json::to_string(&current)?)
             .context("re-parsing comparator output through serde_json (f64 normalization)")?;
-    if actual_normalized == fixture.output {
+    if current_normalized == fixture.output {
         Ok(ComparisonOutcome::Match)
     } else {
         Ok(ComparisonOutcome::Diff {
-            expected: serde_json::to_string_pretty(&fixture.output)?,
-            actual: serde_json::to_string_pretty(&actual_normalized)?,
+            previous: serde_json::to_string_pretty(&fixture.output)?,
+            current: serde_json::to_string_pretty(&current_normalized)?,
         })
     }
 }
@@ -107,7 +115,7 @@ pub fn load_fixtures_for(dir: &Path, transform: &str) -> Result<Vec<(PathBuf, Fi
     Ok(out)
 }
 
-/// Aggregate report of one comparator run.
+/// Aggregate report of one version-parity run.
 #[derive(Debug, Default)]
 pub struct Report {
     pub matched: usize,
@@ -133,8 +141,8 @@ pub fn run_comparator(dir: &Path, comparator: &dyn TransformComparator) -> Resul
     for (path, fixture) in fixtures {
         match compare_fixture(comparator, &fixture)? {
             ComparisonOutcome::Match => report.matched += 1,
-            ComparisonOutcome::Diff { expected, actual } => {
-                report.diffed.push((path, expected, actual));
+            ComparisonOutcome::Diff { previous, current } => {
+                report.diffed.push((path, previous, current));
             }
             ComparisonOutcome::Skipped { reason } => {
                 report.skipped.push((path, reason));
@@ -1145,7 +1153,7 @@ mod tests {
             .unwrap()
             .as_nanos();
         let p = std::env::temp_dir().join(format!(
-            "headroom-parity-{nanos}-{:?}",
+            "headroom-version-parity-{nanos}-{:?}",
             std::thread::current().id()
         ));
         fs::create_dir_all(&p).unwrap();

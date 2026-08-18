@@ -8,7 +8,7 @@ use std::path::PathBuf;
 #[derive(Parser, Debug)]
 #[command(
     name = "parity-run",
-    about = "Run Headroom Rust-vs-Python parity checks"
+    about = "Run Headroom version-parity checks (recorded previous outputs vs current Rust)"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -58,11 +58,11 @@ fn main() -> Result<()> {
                 for (path, reason) in &report.skipped {
                     println!("  skipped {}: {}", path.display(), reason);
                 }
-                for (path, expected, actual) in &report.diffed {
+                for (path, previous, current) in &report.diffed {
                     any_diffs = true;
                     println!("  DIFF {}", path.display());
-                    println!("    expected: {}", first_line(expected));
-                    println!("    actual  : {}", first_line(actual));
+                    println!("    previous: {}", first_line(previous));
+                    println!("    current : {}", first_line(current));
                 }
             }
             if any_diffs {
