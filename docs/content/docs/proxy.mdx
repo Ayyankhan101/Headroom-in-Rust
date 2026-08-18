@@ -734,15 +734,15 @@ headroom proxy
 
 ## Production deployment
 
-### gunicorn
+### Rust binary
+
+The Python FastAPI proxy is retired — `headroom proxy` starts the Rust
+`headroom-proxy` binary:
 
 ```bash
-pip install gunicorn
-
-gunicorn headroom.proxy.server:app \
-  --workers 4 \
-  --bind 0.0.0.0:8787 \
-  --worker-class uvicorn.workers.UvicornWorker
+headroom proxy --host 0.0.0.0 --port 8787
+# ...or run the binary directly
+headroom-proxy --listen 0.0.0.0:8787 --upstream https://api.anthropic.com
 ```
 
 ### Docker

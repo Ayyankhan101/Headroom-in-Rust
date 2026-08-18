@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Breaking
+- **proxy:** the Python FastAPI proxy is retired. `headroom proxy` and `headroom wrap` now run the Rust binary `headroom-proxy`; the LiteLLM `--backend` routing and the Python `headroom.proxy.server` API are gone. Operators use the Rust binary — see the migration guide at `docs/operations/python-to-rust-migration.md`. The Python CLI, evals, learn, memory writers, and integrations are unchanged.
+
 ### Features
 - **proxy:** opt-in cost-aware model routing ([#1706](https://github.com/headroomlabs-ai/headroom/issues/1706)). Set `HEADROOM_MODEL_ROUTER_ENABLED=1` and `HEADROOM_MODEL_ROUTES` (a JSON array of ordered rules) to rewrite the upstream model based on estimated input size and tool presence, complementary to content compression, e.g. send small, tool-free requests to a cheaper model. First matching rule wins, and each decision is logged with a reason so routing stays observable. Malformed rules fail open (the rule is skipped, never silently widened). Disabled by default so behavior is unchanged, skipped under `x-headroom-bypass`/passthrough, and currently applied on the Anthropic `/v1/messages` path.
 - **install:** `headroom install apply` now accepts `--code-aware/--no-code-aware`, `--intercept-tool-results`, `--protect-tool-results`, and `--bedrock-profile`, mirroring the equivalent flags already on `headroom proxy`. Previously the only way to run a persistent deployment with these settings was to hand-edit `manifest.json` after the fact, which silently reverts on the next `install apply`.

@@ -13,7 +13,7 @@ crates/
   headroom-core/                 # library: shared types + transform trait surface
   headroom-proxy/                # binary: axum /healthz (Phase 2 grows this)
   headroom-py/                   # PyO3 cdylib exposing `headroom._core`
-  headroom-parity/               # lib + `parity-run` CLI for Python parity tests
+  headroom-version-parity/       # lib + `parity-run` CLI (version-parity harness)
 tests/parity/
   fixtures/<transform>/*.json    # recorded Python outputs (Phase 1 ports match)
   recorder.py                    # Python-side fixture recorder
@@ -166,14 +166,15 @@ macos-x86_64 wheels via `PyO3/maturin-action` and uploads them as artifacts.
 
 ## Parity harness
 
-`crates/headroom-parity` owns the Rust-vs-Python oracle:
+`crates/headroom-version-parity` owns the version-parity oracle (recorded
+previous-version fixture outputs vs the current Rust implementation):
 
 - JSON fixtures under `tests/parity/fixtures/<transform>/` (schema:
   `{ transform, input, config, output, recorded_at, input_sha256 }`).
 - `TransformComparator` trait — one impl per transform. Phase 0 stubs return
   `Err(...)`; the harness flags those as `Skipped`, not panics.
-- `parity-run` CLI: `cargo run -p headroom-parity -- run [--only TRANSFORM]`.
-- Unit tests in `crates/headroom-parity/src/lib.rs` include a **negative
+- `parity-run` CLI: `cargo run -p headroom-version-parity -- run [--only TRANSFORM]`.
+- Unit tests in `crates/headroom-version-parity/src/lib.rs` include a **negative
   test** (`harness_reports_diff_for_divergent_comparator`) proving the
   harness detects mismatched output before any real port lands.
 
