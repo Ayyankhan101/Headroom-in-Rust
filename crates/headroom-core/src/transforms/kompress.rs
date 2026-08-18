@@ -593,7 +593,7 @@ fn build_session(path: &Path) -> Result<Session, Box<dyn std::error::Error + Sen
              The kompress model is cached locally; to run kompress, \
              `pip install onnxruntime` or set ORT_DYLIB_PATH to your \
              onnxruntime shared library (e.g. the path shown in \
-             RUST_DEV.md / docs/operations/python-to-rust-migration.md)."
+             DEV.md / docs/operations/python-to-rust-migration.md)."
         )
         .into();
         msg
