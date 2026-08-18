@@ -34,26 +34,25 @@
 
 services:
   # Headroom proxy — the OpenAI-compatible endpoint your client talks to.
-  # Built from the repo Dockerfile so it tracks your local checkout.
+  # Uses the pure-Rust distroless image (~50 MB). For the full Python CLI
+  # (memory, learn, evals, wrap launchers) override build target to 'runtime'.
   headroom-proxy:
     build:
       context: .
+      target: runtime-proxy
       args:
         HEADROOM_BUILD_VERSION: ${HEADROOM_BUILD_VERSION:-source-build}
-    # Bind to all interfaces inside the container so the published port is reachable.
-    command: ["--host", "0.0.0.0"]
+    # The Rust binary binds via --listen; default is 0.0.0.0:8787.
     environment:
-      - HEADROOM_HOST=0.0.0.0
-      - HOME=/home/nonroot
-      # Keep all Headroom read/write state on the named volume below.
-      - HEADROOM_WORKSPACE_DIR=/home/nonroot/.headroom
-      - HEADROOM_CONFIG_DIR=/home/nonroot/.headroom/config
-      # if you want to use a custom OpenAI-compatible API endpoint,
-      # uncomment and set the following line with the desired URL
-      # - OPENAI_TARGET_API_URL=https://api.x.ai
-      # Required before publishing this port beyond loopback: without it the
-      # /v1/* data plane accepts unauthenticated callers.
+      # Point at the upstream API (required).
+      - HEADROOM_PROXY_UPSTREAM=${HEADROOM_PROXY_UPSTREAM}
+      # Override listen address if needed (default 0.0.0.0:8787).
+      # - HEADROOM_PROXY_LISTEN=0.0.0.0:8787
+      # Optional: require a token for the /v1/* data plane.
       # - HEADROOM_PROXY_TOKEN=${HEADROOM_PROXY_TOKEN}
+      # Optional: enable cost-aware model routing.
+      # - HEADROOM_MODEL_ROUTER_ENABLED=1
+      # - HEADROOM_MODEL_ROUTES=[{"max_input_tokens":2000,"model":"claude-haiku-3.5"}]
     ports:
       # Loopback-only. The container still listens on 0.0.0.0 (above) so the
       # other compose services can reach it by name; this line controls only
@@ -61,14 +60,10 @@ services:
       - "127.0.0.1:8787:8787"
     volumes:
       - headroom_workspace:/home/nonroot/.headroom
-    # Readiness probe: the orchestrator polls /readyz so dependents and
-    # `docker compose up --wait` only see the proxy as healthy once it's serving.
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8787/readyz"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
+    # No healthcheck here — the distroless static image has no curl or shell.
+    # Use your orchestrator's HTTP probe against /healthz (Kubernetes
+    # livenessProbe, ECS healthCheck, etc.) or switch to the Python image
+    # (remove `target: runtime-proxy`) to get curl-based probes.
     # Start the datastores first. Note: this waits for the containers to start,
     # not for them to be fully ready — the proxy retries its connections, so a
     # brief "database not ready yet" window on first boot is expected.

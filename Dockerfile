@@ -229,5 +229,19 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 ENTRYPOINT ["python3", "-m", "headroom.cli", "proxy"]
 CMD ["--host", "0.0.0.0", "--port", "8787"]
 
+# ---- Runtime stage (pure Rust proxy) ----
+# Single-binary image for proxy-only deployments (~50 MB vs ~500 MB Python).
+# No Python, no shell, no package manager — just the static Rust binary.
+FROM gcr.io/distroless/static-debian12:nonroot AS runtime-proxy
+
+COPY --from=builder /usr/local/bin/headroom-proxy /headroom-proxy
+
+EXPOSE 8787
+
+# No HEALTHCHECK — distroless static has no shell or curl. Orchestrators
+# should probe /healthz directly (Kubernetes livenessProbe, ECS healthCheck).
+
+ENTRYPOINT ["/headroom-proxy"]
+
 # Default published image remains python-slim runtime
 FROM runtime-slim-base AS runtime
