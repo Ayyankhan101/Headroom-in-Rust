@@ -76,6 +76,7 @@
 //!
 //! [`estimate_bloat`]: traits::OffloadTransform::estimate_bloat
 
+pub mod block_compressor;
 pub mod config;
 pub mod offloads;
 pub mod orchestrator;
@@ -94,6 +95,7 @@ pub use config::{
 pub use offloads::{DiffNoise, DiffOffload, JsonOffload, LogOffload, ProseFieldOffload};
 pub use orchestrator::{CompressionPipeline, CompressionPipelineBuilder, PipelineResult};
 pub use reformats::{JsonMinifier, LogTemplate};
+pub use block_compressor::{BlockCompressor, BlockCompressResult, PipelineBlockCompressor};
 pub use traits::{
     CompressionContext, OffloadOutput, OffloadTransform, ReformatOutput, ReformatTransform,
     TransformError,
