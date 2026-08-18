@@ -147,45 +147,22 @@ pub const DEFAULT_MODEL: &str = "claude-3-5-sonnet-20241022";
 // bookkeeping, log lines) costs more than the marginal token savings,
 // and tiny inputs almost never compress at all.
 //
-// Sourced from the spec (`REALIGNMENT/04-phase-B-live-zone.md::PR-B4`).
-// Pinned as `const` rather than a hard-coded `match` so the values are
-// grep-able and reviewable in one place.
+// These are now sourced from [`BlockThresholds`] in the pipeline
+// config. The old hardcoded constants are kept as fallback defaults
+// for the legacy `compress_one_block` path (used by tests); new code
+// should use [`compress_anthropic_live_zone_with_compressor`] which
+// reads thresholds from config.
 
-/// JSON-array tool_results below this size route to no-op.
-const THRESHOLD_JSON_ARRAY: usize = 512;
-/// Build / log output below this size routes to no-op (512 B). Logs
-/// are the most repetitive content type so the threshold is the
-/// lowest of the bunch.
-const THRESHOLD_BUILD_OUTPUT: usize = 512;
-/// Search-result blocks below this size route to no-op.
-const THRESHOLD_SEARCH_RESULTS: usize = 512;
-/// Git-diff blocks below this size route to no-op.
-const THRESHOLD_GIT_DIFF: usize = 512;
-/// Source-code blocks below this size route to no-op. Pinned
-/// for the future Rust code-compressor port — currently unused
-/// because `ContentType::SourceCode` short-circuits to no-op above
-/// the dispatch (see `dispatch_compressor`).
-const THRESHOLD_SOURCE_CODE: usize = 512;
-/// Plain-text blocks below this size route to no-op. Pinned
-/// for the future Kompress wiring (PR-B7 follow-up); currently unused.
-const THRESHOLD_PLAIN_TEXT: usize = 512;
-/// HTML blocks have no compressor; threshold matches plain text so
-/// when an HTML compressor lands the value is already pinned.
-const THRESHOLD_HTML: usize = 512;
+/// Default thresholds matching the pipeline config defaults.
+fn default_thresholds() -> BlockThresholds {
+    BlockThresholds::default()
+}
 
-/// Map a content type to its byte threshold. Returning `usize` rather
-/// than an `Option` because every variant has a sensible default;
-/// `Html` is a no-op anyway so the threshold check never fires.
+/// Legacy threshold lookup for the old `compress_one_block` path.
+/// Deprecated: use [`BlockThresholds::threshold_for`] instead.
+#[allow(dead_code)]
 fn threshold_for(content_type: ContentType) -> usize {
-    match content_type {
-        ContentType::JsonArray => THRESHOLD_JSON_ARRAY,
-        ContentType::BuildOutput => THRESHOLD_BUILD_OUTPUT,
-        ContentType::SearchResults => THRESHOLD_SEARCH_RESULTS,
-        ContentType::GitDiff => THRESHOLD_GIT_DIFF,
-        ContentType::SourceCode => THRESHOLD_SOURCE_CODE,
-        ContentType::PlainText => THRESHOLD_PLAIN_TEXT,
-        ContentType::Html => THRESHOLD_HTML,
-    }
+    default_thresholds().threshold_for(content_type)
 }
 
 // ─── Public types ──────────────────────────────────────────────────────
