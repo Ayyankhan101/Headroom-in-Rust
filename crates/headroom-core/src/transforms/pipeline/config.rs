@@ -55,6 +55,50 @@ pub struct PipelineConfig {
     pub bloat: BloatConfigs,
     pub reformat: ReformatConfigs,
     pub offload: OffloadConfigs,
+    #[serde(default)]
+    pub block_thresholds: BlockThresholds,
+}
+
+/// Per-content-type byte thresholds below which the dispatcher
+/// skips compression entirely. Defaults match the hardcoded
+/// constants that were previously in `live_zone.rs`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct BlockThresholds {
+    pub json_array: usize,
+    pub build_output: usize,
+    pub search_results: usize,
+    pub git_diff: usize,
+    pub source_code: usize,
+    pub plain_text: usize,
+    pub html: usize,
+}
+
+impl Default for BlockThresholds {
+    fn default() -> Self {
+        Self {
+            json_array: 512,
+            build_output: 512,
+            search_results: 512,
+            git_diff: 512,
+            source_code: 512,
+            plain_text: 512,
+            html: 512,
+        }
+    }
+}
+
+impl BlockThresholds {
+    pub fn threshold_for(&self, content_type: crate::transforms::ContentType) -> usize {
+        match content_type {
+            crate::transforms::ContentType::JsonArray => self.json_array,
+            crate::transforms::ContentType::BuildOutput => self.build_output,
+            crate::transforms::ContentType::SearchResults => self.search_results,
+            crate::transforms::ContentType::GitDiff => self.git_diff,
+            crate::transforms::ContentType::SourceCode => self.source_code,
+            crate::transforms::ContentType::PlainText => self.plain_text,
+            crate::transforms::ContentType::Html => self.html,
+        }
+    }
 }
 
 impl PipelineConfig {

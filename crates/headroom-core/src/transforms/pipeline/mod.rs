@@ -84,9 +84,9 @@ pub mod reformats;
 pub mod traits;
 
 pub use config::{
-    BloatConfigs, ConfigError, DiffBloatConfig, DiffNoiseConfig, JsonOffloadConfig, LogBloatConfig,
-    LogTemplateConfig, OffloadConfigs, OrchestratorConfig, PipelineConfig, ProseFieldConfig,
-    ReformatConfigs, SearchBloatConfig,
+    BlockThresholds, BloatConfigs, ConfigError, DiffBloatConfig, DiffNoiseConfig,
+    JsonOffloadConfig, LogBloatConfig, LogTemplateConfig, OffloadConfigs, OrchestratorConfig,
+    PipelineConfig, ProseFieldConfig, ReformatConfigs, SearchBloatConfig,
 };
 // `SearchOffload` is intentionally NOT in the top-level re-export
 // (deprecated from default pipeline; reach via the explicit module
