@@ -66,10 +66,10 @@ pub use log_compressor::{
 #[cfg(feature = "ml")]
 pub use magika_detector::{magika_detect, map_magika_label, MagikaDetectorError};
 pub use pipeline::{
-    BlockThresholds, CompressionContext, CompressionPipeline, CompressionPipelineBuilder,
-    DiffNoise, DiffOffload, JsonMinifier, JsonOffload, LogOffload, LogTemplate, OffloadOutput,
-    OffloadTransform, PipelineConfig, PipelineResult, ProseFieldOffload, ReformatOutput,
-    ReformatTransform, TransformError,
+    BlockCompressResult, BlockCompressor, BlockThresholds, CompressionContext, CompressionPipeline,
+    CompressionPipelineBuilder, DiffNoise, DiffOffload, JsonMinifier, JsonOffload, LogOffload,
+    LogTemplate, OffloadOutput, OffloadTransform, PipelineBlockCompressor, PipelineConfig,
+    PipelineResult, ProseFieldOffload, ReformatOutput, ReformatTransform, TransformError,
 };
 pub use recommendations::{Recommendation, RecommendationStore, RECOMMENDATIONS_PATH_ENV_VAR};
 pub use safety::{tool_pair_indices, ToolPair};

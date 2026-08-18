@@ -47,6 +47,12 @@ pub struct PipelineBlockCompressor {
     pipeline: CompressionPipeline,
 }
 
+impl Default for PipelineBlockCompressor {
+    fn default() -> Self {
+        Self::from_config(&PipelineConfig::default())
+    }
+}
+
 impl PipelineBlockCompressor {
     pub fn from_config(config: &PipelineConfig) -> Self {
         use crate::transforms::pipeline::offloads::{
