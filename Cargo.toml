@@ -5,7 +5,7 @@ members = [
     "crates/headroom-proxy",
     "crates/headroom-simulators",
     "crates/headroom-py",
-    "crates/headroom-parity",
+    "crates/headroom-version-parity",
 ]
 # headroom-py is a Python extension module — it must be built via maturin, not
 # plain cargo (the "extension-module" feature tells pyo3 not to link libpython,
@@ -16,7 +16,7 @@ default-members = [
     "crates/headroom-core",
     "crates/headroom-proxy",
     "crates/headroom-simulators",
-    "crates/headroom-parity",
+    "crates/headroom-version-parity",
 ]
 
 [workspace.package]

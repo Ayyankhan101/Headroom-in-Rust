@@ -46,7 +46,7 @@
 //! match to ~1e-6 (far below the 0.5 threshold), and the kept-word set +
 //! joined output match byte-for-byte. See
 //! `tests/parity/fixtures/kompress/` and `KompressComparator` in
-//! `crates/headroom-parity`.
+//! `crates/headroom-version-parity`.
 //!
 //! # CCR
 //!

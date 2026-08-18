@@ -1916,18 +1916,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "headroom-parity"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "headroom-core",
- "serde",
- "serde_json",
- "thiserror 2.0.20",
-]
-
-[[package]]
 name = "headroom-proxy"
 version = "0.1.0"
 dependencies = [
@@ -2003,6 +1991,18 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "headroom-version-parity"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "headroom-core",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

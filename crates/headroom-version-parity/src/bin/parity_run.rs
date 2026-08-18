@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use headroom_parity::{builtin_comparators, run_comparator};
+use headroom_version_parity::{builtin_comparators, run_comparator};
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]

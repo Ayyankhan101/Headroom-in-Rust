@@ -5,7 +5,7 @@ generic `recorder.py` only captures one positional arg; this script
 captures all three so the Rust comparator gets the same inputs.
 
 Fixture schema (consumed by `SmartCrusherComparator` in
-`crates/headroom-parity/src/lib.rs`):
+`crates/headroom-version-parity/src/lib.rs`):
 
 ```
 {

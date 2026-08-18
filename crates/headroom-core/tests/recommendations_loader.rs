@@ -18,7 +18,7 @@ use headroom_core::transforms::recommendations::{
 };
 
 /// Minimal tempdir helper. Project convention is to avoid a
-/// dev-dependency on `tempfile` (see `crates/headroom-parity` for the
+/// dev-dependency on `tempfile` (see `crates/headroom-version-parity` for the
 /// matching helper). Cleanup happens on drop.
 struct TempDir(PathBuf);
 

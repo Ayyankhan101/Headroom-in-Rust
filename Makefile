@@ -36,13 +36,13 @@ help:
 test:
 	$(CARGO) test --workspace
 
-# headroom-parity has no pyo3 dependency — its comparators call headroom-core
+# headroom-version-parity has no pyo3 dependency — its comparators call headroom-core
 # directly, so this target needs neither a venv nor a built extension module.
-# (See crates/headroom-parity/Cargo.toml: "Phase 0 does not invoke Python from
-# Rust.") Dropping the `maturin develop` step keeps the harness runnable from a
+# (See crates/headroom-version-parity/Cargo.toml: the fixtures are recorded
+# previous-version outputs; comparators call headroom-core directly.) Dropping the `maturin develop` step keeps the harness runnable from a
 # bare checkout and takes the Python toolchain off the CI parity job.
 test-parity:
-	$(CARGO) run -p headroom-parity -- run --fixtures $(FIXTURES)
+	$(CARGO) run -p headroom-version-parity -- run --fixtures $(FIXTURES)
 
 bench:
 	$(CARGO) bench --workspace
