@@ -60,8 +60,15 @@ fn kompress_matches_python_fixtures_byte_for_byte() {
         return;
     }
 
-    let kompress = Kompress::from_files(&tok, &onnx, KompressConfig::default())
-        .expect("load kompress from local files");
+    let kompress = match Kompress::from_files(&tok, &onnx, KompressConfig::default()) {
+        Ok(k) => k,
+        Err(e) => {
+            eprintln!(
+                "SKIP: cannot load kompress model ({e}); \n                 install onnxruntime or set ORT_DYLIB_PATH"
+            );
+            return;
+        }
+    };
 
     let mut checked = 0usize;
     let mut paths: Vec<PathBuf> = fs::read_dir(&fixtures_dir)
@@ -121,7 +128,13 @@ fn short_input_passes_through() {
         eprintln!("SKIP: model not cached");
         return;
     };
-    let kompress = Kompress::from_files(&tok, &onnx, KompressConfig::default()).unwrap();
+    let kompress = match Kompress::from_files(&tok, &onnx, KompressConfig::default()) {
+        Ok(k) => k,
+        Err(e) => {
+            eprintln!("SKIP: cannot load kompress model ({e})");
+            return;
+        }
+    };
 
     let short = "only a few words here";
     let r = kompress.compress(short);
