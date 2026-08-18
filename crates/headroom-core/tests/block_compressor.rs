@@ -13,7 +13,7 @@ fn pipeline_block_compressor_compresses_json_array() {
 
     // A pretty-printed JSON object — JsonMinifier should strip whitespace.
     let input = "{\n  \"a\": 1,\n  \"b\": 2\n}";
-    let result = compressor.compress(input, ContentType::JsonArray, &ctx, &store);
+    let result = compressor.compress(input, ContentType::JsonArray, &ctx, Some(&store));
     assert!(result.bytes_saved > 0, "expected bytes saved on pretty JSON");
     assert!(!result.steps_applied.is_empty(), "expected at least one step");
 }
@@ -25,7 +25,7 @@ fn pipeline_block_compressor_returns_zero_for_empty_input() {
     let store = InMemoryCcrStore::new();
     let ctx = CompressionContext::default();
 
-    let result = compressor.compress("", ContentType::PlainText, &ctx, &store);
+    let result = compressor.compress("", ContentType::PlainText, &ctx, Some(&store));
     assert_eq!(result.bytes_saved, 0);
     assert!(result.steps_applied.is_empty());
 }
@@ -37,7 +37,7 @@ fn pipeline_block_compressor_noop_for_unrelated_content_type() {
     let store = InMemoryCcrStore::new();
     let ctx = CompressionContext::default();
 
-    let result = compressor.compress("not json", ContentType::PlainText, &ctx, &store);
+    let result = compressor.compress("not json", ContentType::PlainText, &ctx, Some(&store));
     assert_eq!(result.bytes_saved, 0);
     assert!(result.steps_applied.is_empty());
 }

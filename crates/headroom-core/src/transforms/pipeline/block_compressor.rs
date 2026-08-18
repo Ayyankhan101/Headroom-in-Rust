@@ -24,6 +24,8 @@ pub struct BlockCompressResult {
     pub cache_key: Option<String>,
     /// Transform names that ran, in execution order.
     pub steps_applied: Vec<String>,
+    /// Strategy tag for telemetry (the last step that fired).
+    pub strategy: &'static str,
 }
 
 /// Compress a single block's text content through the pipeline.
@@ -33,7 +35,7 @@ pub trait BlockCompressor: Send + Sync {
         content: &str,
         content_type: ContentType,
         ctx: &CompressionContext,
-        store: &dyn CcrStore,
+        store: Option<&dyn CcrStore>,
     ) -> BlockCompressResult;
 }
 
@@ -73,14 +75,33 @@ impl BlockCompressor for PipelineBlockCompressor {
         content: &str,
         content_type: ContentType,
         ctx: &CompressionContext,
-        store: &dyn CcrStore,
+        store: Option<&dyn CcrStore>,
     ) -> BlockCompressResult {
-        let result = self.pipeline.run(content, content_type, ctx, store);
+        // The pipeline requires a concrete store reference. When the
+        // caller passes None, we skip offload transforms entirely
+        // by using an in-memory store that we discard afterward.
+        // The pipeline's reformats (JsonMinifier, LogTemplate) don't
+        // need a store, so they still run.
+        let empty_store = crate::ccr::InMemoryCcrStore::new();
+        let store_ref: &dyn CcrStore = store.unwrap_or(&empty_store);
+        let result = self.pipeline.run(content, content_type, ctx, store_ref);
+        let strategy = match result.steps_applied.last().map(String::as_str) {
+            Some("json_minifier") => "json_minifier",
+            Some("log_template") => "log_template",
+            Some("json_offload") => "smart_crusher",
+            Some("log_offload") => "log_compressor",
+            Some("diff_offload") => "diff_compressor",
+            Some("diff_noise") => "diff_noise",
+            Some("prose_field_offload") => "text_crusher",
+            Some("search_offload") => "search_compressor",
+            _ => "pipeline",
+        };
         BlockCompressResult {
             output: result.output,
             bytes_saved: result.bytes_saved,
             cache_key: result.cache_keys.into_iter().next(),
             steps_applied: result.steps_applied,
+            strategy,
         }
     }
 }
