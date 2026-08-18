@@ -11,7 +11,6 @@ from headroom.providers.registry import (
     ProxyProviderRuntime,
     call_client_transport,
     create_proxy_backend,
-    format_backend_status,
 )
 
 
@@ -94,7 +93,7 @@ def test_proxy_provider_runtime_selects_targets_and_providers() -> None:
     assert runtime.select_passthrough_base_url({}) == "https://openai.example"
 
 
-def test_create_proxy_backend_uses_injected_backend_types() -> None:
+def test_create_proxy_backend_uses_injected_anyllm_backend() -> None:
     logger = logging.getLogger("test")
 
     anyllm = create_proxy_backend(
@@ -108,20 +107,8 @@ def test_create_proxy_backend_uses_injected_backend_types() -> None:
             "api_base": api_base,
         },
     )
-    litellm = create_proxy_backend(
-        backend="bedrock",
-        anyllm_provider="ignored",
-        bedrock_region="us-east-1",
-        logger=logger,
-        litellm_backend_cls=lambda provider, region, profile_name=None: {
-            "kind": "litellm",
-            "provider": provider,
-            "region": region,
-        },
-    )
 
     assert anyllm == {"kind": "anyllm", "provider": "groq", "api_base": None}
-    assert litellm == {"kind": "litellm", "provider": "bedrock", "region": "us-east-1"}
 
 
 def test_create_proxy_backend_passes_openai_api_url_to_anyllm() -> None:
@@ -172,35 +159,6 @@ def test_create_proxy_backend_handles_missing_or_direct_backends(
     assert direct is None
     assert missing is None
     assert "any-llm backend not available" in caplog.text
-
-
-def test_format_backend_status_uses_litellm_provider_metadata(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "headroom.backends.litellm.get_provider_config",
-        lambda provider: SimpleNamespace(
-            display_name=provider.upper(),
-            uses_region=(provider == "bedrock"),
-        ),
-    )
-
-    assert (
-        format_backend_status(
-            backend="litellm-bedrock",
-            anyllm_provider="ignored",
-            bedrock_region="us-west-2",
-        )
-        == "BEDROCK via LiteLLM (region=us-west-2)"
-    )
-    assert (
-        format_backend_status(
-            backend="litellm-openai",
-            anyllm_provider="ignored",
-            bedrock_region=None,
-        )
-        == "OPENAI via LiteLLM"
-    )
 
 
 def test_call_client_transport_covers_openai_and_anthropic_paths() -> None:
