@@ -21,7 +21,6 @@ if TYPE_CHECKING:
     from headroom.providers.base import Provider
 
 AnyLLMBackendType: Any = None
-LiteLLMBackendType: Any = None
 
 
 @dataclass(frozen=True)
@@ -194,7 +193,6 @@ def create_proxy_backend(
     logger: logging.Logger,
     openai_api_url: str | None = None,
     anyllm_backend_cls: Any | None = None,
-    litellm_backend_cls: Any | None = None,
 ) -> Backend | None:
     """Create the optional translated backend for Anthropic proxy requests."""
     if backend == "anthropic":
@@ -220,33 +218,13 @@ def create_proxy_backend(
             )
             return None
 
-    normalized_backend = backend if backend.startswith("litellm-") else f"litellm-{backend}"
-    provider = normalized_backend.replace("litellm-", "")
-    # `litellm-vertex` is the name in our docs/help, but LiteLLM (and our
-    # provider registry) keys Google Vertex on `vertex_ai`. Without this alias
-    # the provider falls through to a generic pass-through: wrong model prefix
-    # (`vertex/…` instead of `vertex_ai/…`), region dropped, auth mishandled.
-    if provider in ("vertex", "google-vertex", "googlevertex"):
-        provider = "vertex_ai"
-    try:
-        backend_cls = litellm_backend_cls or _load_litellm_backend()
-        instance = cast(
-            "Backend",
-            backend_cls(provider=provider, region=bedrock_region, profile_name=bedrock_profile),
-        )
-        logger.info("LiteLLM backend enabled (provider=%s, region=%s)", provider, bedrock_region)
-        return instance
-    except ImportError as exc:
-        logger.warning("LiteLLM backend not available: %s", exc)
-        return None
-    except Exception as exc:  # pragma: no cover - defensive logging
-        _log_backend_init_failure(
-            logger,
-            backend=normalized_backend,
-            provider=provider,
-            exc=exc,
-        )
-        return None
+    # The LiteLLM proxy backend was retired in PR-3.2 (BASELINE §2.2): native
+    # Bedrock/Vertex envelopes live in the Rust proxy, and any-llm covers the
+    # remaining translated routes. Fail loudly rather than silently degrading.
+    logger.warning(
+        "LiteLLM backend is retired. Use any-llm or the native Bedrock/Vertex routes."
+    )
+    return None
 
 
 def format_backend_status(*, backend: str, anyllm_provider: str, bedrock_region: str | None) -> str:
@@ -256,13 +234,8 @@ def format_backend_status(*, backend: str, anyllm_provider: str, bedrock_region:
     if backend == "anyllm" or backend.startswith("anyllm-"):
         return f"{anyllm_provider.title()} via any-llm"
 
-    from headroom.backends.litellm import get_provider_config
-
-    provider = backend.replace("litellm-", "")
-    provider_config = get_provider_config(provider)
-    if provider_config.uses_region:
-        return f"{provider_config.display_name} via LiteLLM (region={bedrock_region})"
-    return f"{provider_config.display_name} via LiteLLM"
+    # LiteLLM proxy backend retired in PR-3.2
+    return f"{backend} (unsupported - litellm backend retired)"
 
 
 def call_client_transport(
@@ -298,15 +271,6 @@ def _load_anyllm_backend() -> Any:
 
         AnyLLMBackendType = AnyLLMBackend
     return AnyLLMBackendType
-
-
-def _load_litellm_backend() -> Any:
-    global LiteLLMBackendType
-    if LiteLLMBackendType is None:
-        from headroom.backends.litellm import LiteLLMBackend
-
-        LiteLLMBackendType = LiteLLMBackend
-    return LiteLLMBackendType
 
 
 def _call_openai_transport(
